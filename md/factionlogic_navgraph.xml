@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mdscript name="FactionLogic_NavGraph" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../libraries/md.xsd">
+    <cues>
+        <cue name="InstantiateNavGraphs" instantiate="true" namespace="this">
+            <conditions>
+                <event_cue_signalled />
+            </conditions>
+            <actions>
+                <debug_text text="'Creating global NavGraph'" />
+                <signal_cue_instantly cue="CreateTerritoryLinks" />
+                <signal_cue_instantly cue="CalculateTerritoryCost" />
+            </actions>
+        </cue>
+        <cue name="CreateTerritoryLinks" instantiate="true">
+            <conditions>
+                <event_cue_signalled cue="md.FactionLogic_NavGraph.CreateTerritoryLinks" />
+            </conditions>
+            <actions>
+                <set_value name="global.$MKFactionData.$GlobalNavGraph" exact="table[]" />
+                <do_for_each name="$TerKey" valuename="$TerEntry" in="global.$MKFactionData.$AllTerritories">
+                    <do_if value="not global.$MKFactionData.$GlobalNavGraph.{$TerKey}?">
+                        <set_value name="global.$MKFactionData.$GlobalNavGraph.{$TerKey}" exact="table[$Neighbors = table[]]" />
+                    </do_if>
+                    <set_value name="$Sectors" exact="$TerEntry.$Sectors" />
+
+                    <do_for_each name="$Sector" in="$Sectors">
+                        <find_sector_in_range name="$NeighborSectors" object="$Sector" multiple="true" maxdistance="1">
+                            <match_any excluded="$Sectors" />
+                            <match_any excluded="$Sector" />
+                        </find_sector_in_range>
+                        <do_for_each name="$Neighbor" in="$NeighborSectors">
+                            <set_value name="$NeighborTerKey" exact="global.$MKFactionData.$SectorToTerritory.{$Neighbor}.$TerritoryKey" />
+                            <set_value name="$NeighborTerEntry" exact="global.$MKFactionData.$SectorToTerritory.{$Neighbor}.$TerritoryEntry" />
+                            <do_if value="not global.$MKFactionData.$GlobalNavGraph.{$TerKey}.$Neighbors.{$NeighborTerKey}?">
+                                <get_jump_path component="$Gates" multiple="true">
+                                    <start object="$Sector" />
+                                    <end object="$Neighbor" />
+                                </get_jump_path>
+                                <set_value name="global.$MKFactionData.$GlobalNavGraph.{$TerKey}.$Neighbors.{$NeighborTerKey}" exact="table[$TerritoryKey = $NeighborTerKey, $TerritoryEntry = $NeighborTerEntry, $EntranceGate = $Gates.{1}, $ExitGate = $Gates.{2}]" />
+                            </do_if>
+                        </do_for_each>
+                    </do_for_each>
+                </do_for_each>
+            </actions>
+        </cue>
+        <cue name="CalculateTerritoryCost" instantiate="true">
+            <conditions>
+                <event_cue_signalled />
+            </conditions>
+            <actions>
+                <do_for_each in="global.$MKFactionData.$Factions">
+                    <set_value name="$Faction" exact="loop.key" />
+                    <set_value name="$FactionEntry" exact="loop.value" />
+
+                    <do_for_each name="$TerKey" valuename="$TerEntry" in="global.$MKFactionData.$AllTerritories">
+                        <do_if value="$TerEntry.$Sectors.{1}.trueowner.relationto.{$Faction} le -0.20">
+                            <do_if value="$TerEntry.$Sectors.{1}.trueowner == $Faction">
+                                <debug_text text="'How is faction hostile to self?'" />
+                            </do_if>
+                            <set_value name="$FactionEntry.$CostGraph.{$TerKey}" exact="table[$BaseCost = 10, $ReconCost = null, $StaleTime = null]" />
+                        </do_if>
+                        <do_else>
+                            <set_value name="$FactionEntry.$CostGraph.{$TerKey}" exact="table[$BaseCost = 1, $ReconCost = null, $StaleTime = null]" />
+                        </do_else>
+                    </do_for_each>
+                </do_for_each>
+            </actions>
+        </cue>
+        <cue name="BuildFactionNavGraph" instantiate="true">
+            <conditions>
+                <event_cue_signalled />
+            </conditions>
+            <actions>
+                <set_value name="$TotalCost" exact="-1" />
+                <set_value name="$Faction" exact="event.param.{1}" />
+                <set_value name="$FactionEntry" exact="event.param.{2}" />
+                <set_value name="$SourceKey" exact="event.param.{3}" />
+                <set_value name="$SourceValue" exact="event.param.{4}" />
+                <set_value name="$DestinationKey" exact="event.param.{5}" />
+                <set_value name="$DestinationValue" exact="event.param.{6}" />
+                <set_value name="$HopList" exact="table[]" />
+                <set_value name="$Cost" exact="table[]" />
+                <set_value name="$HopList.{$DestinationKey}" exact="null" />
+                <set_value name="$Cost.{$DestinationKey}" exact="0" />
+                <set_value name="$UnexploredTerritories" exact="[]" />
+                <append_to_list name="$UnexploredTerritories" exact="[$DestinationKey, $DestinationValue, 0]" />
+                <set_value name="$MaxCount" exact="0" />
+                <set_value name="$BreakLoop" exact="false" />
+                <do_while value="$UnexploredTerritories.count gt 0">
+                    <do_if value="$MaxCount == 200">
+                        <debug_text text="'Error!! Max count reached!!'" />
+                        <break />
+                    </do_if>
+                    <do_if value="$BreakLoop">
+                        <break />
+                    </do_if>
+                    <sort_list list="$UnexploredTerritories" sortbyvalue="loop.element.{3}" />
+                    <set_value name="$CheapestUnknown" exact="$UnexploredTerritories.{1}" />
+
+                    <set_value name="$ProbeKey" exact="$CheapestUnknown.{1}" />
+                    <set_value name="$ProbeNeighbors" exact="$CheapestUnknown.{2}.$Neighbors" />
+                    <set_value name="$ProbeCost" exact="$CheapestUnknown.{3}" />
+                    <do_for_each in="$ProbeNeighbors">
+                        <set_value name="$NeighborKey" exact="loop.key" />
+                        <set_value name="$NeighborValue" exact="loop.value.$NeighborData" />
+                        <do_if value="$NeighborValue.$Sectors.{1}.trueowner.relationto.{$Faction} le -0.20">
+                            <do_if value="not $FactionEntry.$CostGraph.{$NeighborKey}?">
+                                <set_value name="$FactionEntry.$CostGraph.{$NeighborKey}" exact="table[$BaseCost = 10, $ReconCost = null, $StaleTime = null]" />
+                            </do_if>
+                            <set_value name="$NeighborCost" exact="10" />
+                        </do_if>
+                        <do_else>
+                            <do_if value="not $FactionEntry.$CostGraph.{$NeighborKey}?">
+                                <set_value name="$FactionEntry.$CostGraph.{$NeighborKey}" exact="table[$BaseCost = 1, $ReconCost = null, $StaleTime = null]" />
+                            </do_if>
+                            <set_value name="$NeighborCost" exact="1" />
+                        </do_else>
+                        <set_value name="$NeighborCost" exact="$NeighborCost + $ProbeCost" />
+                        <do_if value="not $Cost.{$NeighborKey}? or $Cost.{$NeighborKey} gt $NeighborCost">
+                            <set_value name="$Cost.{$NeighborKey}" exact="$NeighborCost" />
+                            <append_to_list name="$UnexploredTerritories" exact="[$NeighborKey, $NeighborValue, $NeighborCost]" />
+                            <set_value name="$HopList.{$NeighborKey}" exact="[$NeighborKey, $ProbeKey, $NeighborCost]" />
+                            <do_if value="$NeighborKey == $SourceKey">
+                                <set_value name="$Final" exact="$NeighborKey" />
+                                <set_value name="$TotalCost" exact="$NeighborCost" />
+                                <set_value name="$BreakLoop" exact="true" />
+                                <break />
+                            </do_if>
+                        </do_if>
+                    </do_for_each>
+                    <set_value name="$MaxCount" exact="$MaxCount + 1" />
+                    <remove_value name="$UnexploredTerritories.{$UnexploredTerritories.indexof.{$CheapestUnknown}}" />
+                </do_while>
+                <set_value name="$MaxCount" exact="0" />
+                <set_value name="$FinalHopList" exact="[]" />
+                <set_value name="$Iterator" exact="$HopList.{$Final}" />
+                <do_while value="$Iterator != null">
+                    <do_if value="$MaxCount == 200">
+                        <debug_text text="'Error! Breaking!'" />
+                        <break />
+                    </do_if>
+                    <do_if value="$FactionEntry.$CostGraph.{$Iterator.{1}}.$BaseCost ge 10">
+                        <set_value name="$TraverseDangerous" exact="true" />
+                    </do_if>
+                    <append_to_list name="$FinalHopList" exact="[$Iterator.{1}, $Iterator.{2}, $Iterator.{3}]" />
+                    <set_value name="$Iterator" exact="$HopList.{$Iterator.{2}}" />
+                    <set_value name="$MaxCount" exact="$MaxCount + 1" />
+                </do_while>
+                <set_value name="$Dangerous" exact="if $TraverseDangerous? then true else false" />
+                <set_value name="$FactionEntry.$NavGraph.{$SourceKey}.$To.{$DestinationKey}" exact="table[$HopList = $FinalHopList, $TotalCost = $TotalCost, $Dangerous = $Dangerous]" />
+            </actions>
+        </cue>
+    </cues>
+</mdscript>

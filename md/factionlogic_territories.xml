@@ -1,0 +1,396 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mdscript name="FactionLogic_Territories" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../libraries/md.xsd">
+    <cues>
+        <cue name="InstantiateTerritoryManagers" instantiate="true">
+            <conditions>
+                <event_cue_signalled />
+            </conditions>
+            <actions>
+                <set_value name="global.$MKFactionData" exact="table[]" />
+                <set_value name="global.$MKFactionData.$Factions" exact="table[]" />
+                <set_value name="global.$MKFactionData.$SectorToTerritory" exact="table[]" />
+                <set_value name="global.$MKFactionData.$AllTerritories" exact="table[]" />
+                <find_sector name="$AllSectors" space="player.galaxy" multiple="true" />
+                <do_while value="$AllSectors.count">
+                    <set_value name="$Faction" exact="$AllSectors.{1}.trueowner" />
+                    <do_if value="not global.$MKFactionData.$Factions.{$Faction}?">
+                        <signal_cue_instantly cue="Territories_Manager" param="$Faction" />
+                    </do_if>
+                    <do_for_each name="$TerritoryKey" valuename="$TerritoryEntry" in="global.$MKFactionData.$Factions.{$Faction}.$OwnedTerritories">
+                        <do_for_each name="$Sector" in="$TerritoryEntry.$Sectors">
+                            <set_value name="global.$MKFactionData.$SectorToTerritory.{$Sector}" exact="table[$TerritoryKey = $TerritoryKey, $TerritoryEntry = $TerritoryEntry]" />
+                            <set_value name="global.$MKFactionData.$AllTerritories.{$TerritoryKey}" exact="$TerritoryEntry" />
+                        </do_for_each>
+                        <remove_from_list name="$AllSectors" list="$TerritoryEntry.$Sectors" />
+                    </do_for_each>
+                </do_while>
+                <do_for_each in="lookup.faction.list" name="$Faction">
+                    <do_if value="$Faction.hastag.{tag.privateloadout} and $Faction.isactive and not $Faction.hastag.{tag.hidden} or $Faction == faction.player">
+                        <do_if value="not global.$MKFactionData.$Factions.{$Faction}?">
+                            <signal_cue_instantly cue="Territories_Manager" param="$Faction" />
+                        </do_if>
+                    </do_if>
+                </do_for_each>
+                <do_for_each name="$Faction" in="global.$MKFactionData.$Factions">
+                    <run_actions ref="NeutralTerritoryCreation">
+                        <param name="Faction" value="$Faction" />
+                        <param name="FactionEntry" value="loop.value" />
+                    </run_actions>
+                </do_for_each>
+                <signal_cue_instantly cue="md.FactionLogic_NavGraph.InstantiateNavGraphs" />
+                <signal_cue_instantly cue="md.FactionLogic_EconData.InstantiateTerritoryEconData" />
+                <signal_cue_instantly cue="md.FactionLogic_Diplomacy.InstantiateDiplomacy" chance="0" />
+            </actions>
+        </cue>
+
+        <cue name="Territories_Manager" namespace="this" instantiate="true">
+            <conditions>
+                <event_cue_signalled />
+            </conditions>
+            <actions>
+                <set_value name="$Faction" exact="event.param" />
+                <set_value name="global.$MKFactionData.$Factions.{$Faction}" exact="table[]" />
+                <set_value name="$FactionEntry" exact="global.$MKFactionData.$Factions.{$Faction}" />
+                <set_value name="$FactionEntry.$OwnedTerritories" exact="table[]" comment="These 'Territories' are contiguous sectors bundled together" />
+                <set_value name="$FactionEntry.$NeutralTerritories" exact="table[]" comment="These are territories not under our ownership but have our stations" />
+                <set_value name="$FactionEntry.$ConflictTerritories" exact="table[]" comment="These are dangerous sectors" />
+                <set_value name="$FactionEntry.$CostGraph" exact="table[]" comment="All current Territories with cost. Ex. Enemy Territory would be key $Arg_Own1 and return
+                                                                                $BaseCost = 10, $ReconCost = some number n, $StaleTime = amount of t time since recon eval" />
+                <set_value name="$FactionEntry.$TradeGraph" exact="table[]" comment="Cached trades for easy access" />
+                <create_group groupname="$AllOwnedSectors" />
+                <run_actions ref="OwnedTerritoryCreation">
+                    <param name="Faction" value="$Faction" />
+                    <param name="FactionEntry" value="$FactionEntry" />
+                </run_actions>
+            </actions>
+        </cue>
+        <library name="OwnedTerritoryCreation" purpose="run_actions">
+            <params>
+                <param name="Faction" />
+                <param name="FactionEntry" />
+            </params>
+            <actions>
+                <set_value name="$TerritoriedSectors" exact="[]" />
+                <find_sector name="$OwnedSectors" owner="$Faction" multiple="true">
+                    <match_any trueowner="$Faction" />
+                </find_sector>
+                <add_to_group groupname="$AllOwnedSectors" list="$OwnedSectors" />
+                <set_value name="$FactionEntry.$AllOwnedSectors" exact="$AllOwnedSectors" />
+                <do_for_each name="$Sector" in="$OwnedSectors">
+                    <run_actions ref="DesignateTerritory">
+                        <param name="Faction" value="$Faction" />
+                        <param name="FactionEntry" value="$FactionEntry" />
+                        <param name="RootSector" value="$Sector" />
+                        <param name="TerritoriedSectors" value="$TerritoriedSectors" />
+                    </run_actions>
+                </do_for_each>
+            </actions>
+        </library>
+        <library name="DesignateTerritory" purpose="run_actions">
+            <params>
+                <param name="Faction" />
+                <param name="FactionEntry" />
+                <param name="RootSector" />
+                <param name="TerritoriedSectors" />
+            </params>
+            <actions>
+                <do_if value="$TerritoriedSectors.indexof.{$RootSector} == 0">
+                    <set_value name="$UnexploredList" exact="[$RootSector]" />
+                    <set_value name="$TerritoryEntry" exact="table[]" />
+                    <set_value name="$TerritorySectors" exact="[]" />
+                    <do_while value="$UnexploredList.count gt 0">
+                        <set_value name="$CurrentSector" exact="$UnexploredList.{1}" />
+                        <find_sector_in_range name="$Neighbors" object="$CurrentSector" owner="$Faction" maxdistance="1" multiple="true">
+                            <match_any trueowner="$Faction"></match_any>
+                            <match_any excluded="$TerritorySectors" />
+                        </find_sector_in_range>
+                        <append_list_elements name="$TerritorySectors" other="$Neighbors" />
+                        <append_list_elements name="$UnexploredList" other="$Neighbors" />
+                        <remove_value name="$UnexploredList.{1}" />
+                    </do_while>
+                    <do_if value="$TerritorySectors.count le 5">
+                        <set_value name="$TerritoryNum" exact="$FactionEntry.$OwnedTerritories.keys.count + 1" />
+                        <set_value name="$TerritoryID" exact="'$' + $Faction.id + '_Own' + $TerritoryNum" />
+                        <set_value name="$TerritoryEntry" exact="table[$TerritoryKey = $TerritoryID, $Sectors = $TerritorySectors]" />
+                        <set_value name="$FactionEntry.$OwnedTerritories.{$TerritoryID}" exact="$TerritoryEntry" />
+                    </do_if>
+                    <do_else>
+                        <run_actions ref="SplitTerritory">
+                            <param name="Faction" value="$Faction" />
+                            <param name="FactionEntry" value="$FactionEntry" />
+                            <param name="TerritorySectors" value="$TerritorySectors" />
+                        </run_actions>
+                    </do_else>
+                    <append_list_elements name="$TerritoriedSectors" other="$TerritorySectors" />
+                </do_if>
+            </actions>
+        </library>
+        <library name="SplitTerritory" purpose="run_actions">
+            <params>
+                <param name="Faction" />
+                <param name="FactionEntry" />
+                <param name="TerritorySectors" />
+            </params>
+            <actions>
+                <run_actions ref="FFT" result="$FFTData">
+                    <param name="TerritorySectors" value="$TerritorySectors" />
+                </run_actions>
+                <run_actions ref="FloodFill" result="$SplitGroups">
+                    <param name="Faction" value="$Faction" />
+                    <param name="TerritorySectors" value="$FFTData.{1}" />
+                    <param name="MaxTerritories" value="$FFTData.{2}" />
+                    <param name="MaxSize" value="$FFTData.{3}" />
+                </run_actions>
+                <do_for_each name="$Territory" in="$SplitGroups">
+                    <set_value name="$TerritoryNum" exact="$FactionEntry.$OwnedTerritories.keys.count + 1" />
+                    <set_value name="$TerritoryID" exact="'$' + $Faction.id + '_Own' + $TerritoryNum" />
+                    <set_value name="$TerritoryEntry" exact="table[$TerritoryKey = $TerritoryID, $Sectors = $Territory]" />
+                    <set_value name="$FactionEntry.$OwnedTerritories.{$TerritoryID}" exact="$TerritoryEntry" />
+                </do_for_each>
+            </actions>
+        </library>
+        <library name="FFT" purpose="run_actions" comment="Farthest First Traversal to split up large contiguous territories into subterritories roughly equal size">
+            <params>
+                <param name="TerritorySectors" />
+            </params>
+            <actions>
+                <set_value name="$UnselectedPoints" exact="$TerritorySectors.clone" />
+                <set_value name="$NewTerritoryCount" exact="(sqrt($UnselectedPoints.count)) i" />
+                <set_value name="$SectorsPer" exact="$UnselectedPoints.count / $NewTerritoryCount" />
+                <set_value name="$SpacedPoints" exact="[]" />
+                <set_value name="$MaxCount" exact="0" />
+                <do_while value="$UnselectedPoints.count gt 0">
+                    <do_if value="$MaxCount == 500">
+                        <debug_text text="'Error! Counter reached max of 500!'" />
+                        <break />
+                    </do_if>
+                    <set_value name="$i" exact="1" />
+                    <set_value name="$SeedSector" exact="null" />
+                    <do_while value="$i le $UnselectedPoints.count">
+                        <set_value name="$j" exact="1" />
+                        <!-- Find the farthest sector $j from $i-->
+                        <do_while value="$j le $UnselectedPoints.count">
+                            <do_if value="$SeedSector != null">
+                                <set_value name="$OuterSector" exact="$SeedSector" />
+                            </do_if>
+                            <do_else>
+                                <set_value name="$OuterSector" exact="$UnselectedPoints.{$i}" />
+                            </do_else>
+                            <set_value name="$InnerSector" exact="$UnselectedPoints.{$j}" />
+                            <do_if value="$OuterSector == $InnerSector">
+                                <set_value name="$j" exact="$j + 1" />
+                                <set_value name="$FarthestDistance" exact="0" />
+                                <set_value name="$FarthestSector" exact="$OuterSector" />
+                                <continue />
+                            </do_if>
+                            <find_sector_in_range object="$OuterSector" distances="$Distance">
+                                <match_any excluded="$InnerSector" negate="true" />
+                            </find_sector_in_range>
+                            <set_value name="$SectorDistance" exact="$Distance.{$InnerSector}" />
+                            <do_if value="not $FarthestSector? or $FarthestDistance lt $SectorDistance">
+                                <set_value name="$FarthestDistance" exact="$SectorDistance" />
+                                <set_value name="$FarthestSector" exact="$InnerSector" />
+                            </do_if>
+                            <set_value name="$j" exact="$j + 1" />
+                        </do_while>
+                        <do_if value="$UnselectedPoints.indexof.{$FarthestSector}">
+                            <append_to_list name="$SpacedPoints" exact="[$FarthestSector, $FarthestDistance]" />
+                            <set_value name="$SeedSector" exact="$FarthestSector" />
+                            <set_value name="$i" exact="1" />
+                            <remove_value name="$UnselectedPoints.{$UnselectedPoints.indexof.{$FarthestSector}}" />
+                            <remove_value name="$FarthestSector" />
+                            <remove_value name="$FarthestDistance" />
+                        </do_if>
+                        <do_else>
+                            <append_to_list name="$SpacedPoints" exact="[$UnselectedPoints.{1}, 0]" />
+                            <remove_value name="$UnselectedPoints.{1}" />
+                        </do_else>
+                    </do_while>
+                    <set_value name="$MaxCount" exact="$MaxCount + 1" />
+                </do_while>
+                <!-- Sort based on sectors most spaced from others. Entries are formatted as [[SectorID, Distance], [], etc]-->
+                <sort_list list="$SpacedPoints" sortbyvalue="loop.element.{2}" sortdescending="true" />
+                <set_value name="$ReturnList" exact="[]" />
+                <do_for_each in="$SpacedPoints">
+                    <append_to_list name="$ReturnList" exact="loop.element.{1}" />
+                </do_for_each>
+                <return value="[$ReturnList, $NewTerritoryCount, $SectorsPer]" />
+            </actions>
+        </library>
+        <library name="FloodFill" purpose="run_actions">
+            <params>
+                <param name="Faction" />
+                <param name="TerritorySectors" />
+                <param name="MaxTerritories" />
+                <param name="MaxSize" />
+            </params>
+            <actions>
+                <set_value name="$UnclaimedSectors" exact="$TerritorySectors.clone" />
+                <set_value name="$ClaimedSectors" exact="[]" />
+                <set_value name="$TerritoryIndex" exact="0" />
+                <set_value name="$HighestIteration" exact="1" />
+                <set_value name="$TerritoryEntries" exact="[]" />
+                <set_value name="$MaxTerritoriesMade" exact="false" />
+                <set_value name="$FailCount" exact="0" />
+                <do_while value="$UnclaimedSectors.count gt 0">
+                    <do_if value="$TerritoryIndex lt $MaxTerritories">
+                        <append_to_list name="$ClaimedSectors" exact="$UnclaimedSectors.{1}" />
+                        <set_value name="$TerritoryIndex" exact="$TerritoryIndex + 1" />
+                        <set_value name="$NewTerritory" exact="[$UnclaimedSectors.{1}]" />
+                        <set_value name="$SpreadDistance" exact="1" />
+                        <set_value name="$TerritoryIterations" exact="0" />
+                        <set_value name="$CurrentSize" exact="1" />
+                        <set_value name="$DeficitSize" exact="$CurrentSize - $MaxSize" />
+                        <remove_from_list name="$UnclaimedSectors" exact="$UnclaimedSectors.{1}" />
+                        <append_to_list name="$TerritoryEntries" exact="[$NewTerritory, $SpreadDistance, $TerritoryIterations, $CurrentSize, $DeficitSize]" />
+                    </do_if>
+                    <sort_list list="$TerritoryEntries" sortbyvalue="loop.element.{5}" sortdescending="true" />
+
+                    <do_if value="$TerritoryEntries.last.{1}.count lt $MaxSize">
+                        <set_value name="$TerritoryEntry" exact="$TerritoryEntries.last" />
+                        <set_value name="$AddedNewNeighbor" exact="false" />
+                        <do_for_each name="$Sector" in="$TerritoryEntry.{1}" reverse="true">
+                            <find_sector_in_range name="$NeighborSector" object="$Sector" owner="$Faction" maxdistance="1">
+                                <match_any trueowner="$Faction" />
+                                <match_any excluded="$ClaimedSectors" />
+                            </find_sector_in_range>
+                            <do_if value="$NeighborSector != null">
+                                <do_if value="$ClaimedSectors.indexof.{$NeighborSector} == 0">
+                                    <append_to_list name="$ClaimedSectors" exact="$NeighborSector" />
+                                    <append_to_list name="$TerritoryEntry.{1}" exact="$NeighborSector" />
+                                    <remove_from_list name="$UnclaimedSectors" exact="$NeighborSector" />
+                                    <set_value name="$TerritoryEntry.{4}" exact="$TerritoryEntry.{1}.count" />
+                                    <set_value name="$TerritoryEntry.{5}" exact="$TerritoryEntry.{4} - $MaxSize" />
+                                    <set_value name="$AddedNewNeighbor" exact="true" />
+                                    <break />
+                                </do_if>
+                            </do_if>
+                        </do_for_each>
+                        <do_if value="not $AddedNewNeighbor">
+                            <set_value name="$TerritoryEntry.{5}" exact="100" />
+                            <set_value name="$FailCount" exact="$FailCount + 1" />
+                        </do_if>
+                    </do_if>
+                    <do_else>
+                        <set_value name="$TerritoryEntries.last.{5}" exact="100" />
+                        <set_value name="$FailCount" exact="$FailCount + 1" />
+                    </do_else>
+
+                    <do_if value="$FailCount == $MaxTerritories">
+                        <set_value name="$MaxTerritories" exact="$MaxTerritories + 1" />
+                    </do_if>
+                </do_while>
+
+                <!-- Get rid of any Territories consisting of a single sector -->
+                <sort_list list="$TerritoryEntries" sortbyvalue="loop.element.{1}.count" sortdescending="false" />
+                <do_for_each name="$Entry" in="$TerritoryEntries" reverse="true">
+                    <do_if value="$Entry.{1}.count == 1">
+                        <find_sector_in_range name="$NeighborSector" object="$Entry.{1}.{1}" owner="$Faction" maxdistance="1">
+                            <match_any trueowner="$Faction" />
+                            <match_any excluded="$Entry.{1}.{1}" />
+                        </find_sector_in_range>
+                        <do_for_each name="$OtherEntry" in="$TerritoryEntries">
+                            <do_if value="$OtherEntry.{1}.indexof.{$NeighborSector} gt 0 and $OtherEntry != $Entry">
+                                <append_to_list name="$OtherEntry.{1}" exact="$Entry.{1}.{1}" />
+                                <remove_from_list name="$TerritoryEntries" exact="$Entry" />
+                                <break />
+                            </do_if>
+                        </do_for_each>
+                    </do_if>
+                </do_for_each>
+                <set_value name="$ReturnList" exact="[]" />
+                <do_for_each name="$Entry" in="$TerritoryEntries">
+                    <append_to_list name="$ReturnList" exact="$Entry.{1}" />
+                </do_for_each>
+                <return value="$ReturnList" />
+            </actions>
+        </library>
+        <library name="NeutralTerritoryCreation" purpose="run_actions">
+            <params>
+                <param name="Faction" />
+                <param name="FactionEntry" />
+            </params>
+            <actions>
+                <find_station_by_true_owner name="$Results" faction="$Faction" space="player.galaxy" multiple="true">
+                    <match indestructible="false" />
+                    <match_parent>
+                        <match_parent excluded="$FactionEntry.$AllOwnedSectors">
+                            <match ishostileto="$Faction" negate="true" />
+                        </match_parent>
+                    </match_parent>
+                </find_station_by_true_owner>
+                <do_for_each name="$Station" in="$Results">
+                    <set_value name="$StationTerritory" exact="global.$MKFactionData.$SectorToTerritory.{$Station.sector}" />
+                    <do_for_each name="$TerKey" in="$FactionEntry.$NeutralTerritories">
+                        <set_value name="$TerritoryEntry" exact="loop.value" />
+                        <do_if value="$StationTerritory.$TerritoryKey == $TerKey">
+                            <set_value name="$InTerritory" exact="true" />
+                            <break />
+                        </do_if>
+                    </do_for_each>
+                    <do_if value="not @$InTerritory">
+                        <set_value name="$FactionEntry.$NeutralTerritories.{$StationTerritory.$TerritoryKey}" exact="$StationTerritory.$TerritoryEntry" />
+                    </do_if>
+                </do_for_each>
+            </actions>
+        </library>
+
+        <cue name="TerritoryChangeOwnership" instantiate="true">
+            <conditions>
+                <event_contained_sector_changed_true_owner space="player.galaxy" />
+            </conditions>
+            <actions>
+                <debug_text text="'Sector ownership changed and remaking Territories!'" />
+                <set_value name="$Sector" exact="event.param" />
+                <set_value name="$NewFaction" exact="event.param2" />
+                <set_value name="$NewFactionEntry" exact="global.$MKFactionData.$Factions.{$NewFaction}" />
+                <set_value name="$OldFaction" exact="event.param3" />
+                <set_value name="$OldFactionEntry" exact="global.$MKFactionData.$Factions.{$OldFaction}" />
+                <set_value name="$OldTerritory" exact="global.$MKFactionData.$SectorToTerritory.{$Sector}" />
+                <set_value name="$OldTerritoryKey" exact="$OldTerritory.$TerritoryKey" />
+                <set_value name="$OldTerritoryEntry" exact="$OldTerritory.$TerritoryEntry" />
+
+                <set_value name="$OldTerritoryEntry.$OwnedTerritories" exact="table[]" />
+                <set_value name="$OldTerritoryEntry.$NeutralTerritories" exact="table[]" />
+                <set_value name="$OldTerritoryEntry.$CostGraph" exact="table[]" />
+                <run_actions ref="md.FactionLogic_Territories.OwnedTerritoryCreation">
+                    <param name="Faction" value="$OldFaction" />
+                    <param name="FactionEntry" value="$OldFactionEntry" />
+                </run_actions>
+                <run_actions ref="md.FactionLogic_Territories.NeutralTerritoryCreation">
+                    <param name="Faction" value="$OldFaction" />
+                    <param name="FactionEntry" value="$OldFactionEntry" />
+                </run_actions>
+
+                <set_value name="$NewFactionEntry.$OwnedTerritories" exact="table[]" />
+                <set_value name="$NewFactionEntry.$NeutralTerritories" exact="table[]" />
+                <set_value name="$NewFactionEntry.$CostGraph" exact="table[]" />
+                <run_actions ref="md.FactionLogic_Territories.OwnedTerritoryCreation">
+                    <param name="Faction" value="$NewFaction" />
+                    <param name="FactionEntry" value="$NewFactionEntry" />
+                </run_actions>
+                <run_actions ref="md.FactionLogic_Territories.NeutralTerritoryCreation">
+                    <param name="Faction" value="$NewFaction" />
+                    <param name="FactionEntry" value="$NewFactionEntry" />
+                </run_actions>
+
+
+                <do_for_each name="$TerritoryKey" valuename="$TerritoryEntry" in="$OldTerritoryEntry.$OwnedTerritories">
+                    <do_for_each name="$OwnedSector" in="$TerritoryEntry.$Sectors">
+                        <set_value name="global.$MKFactionData.$SectorToTerritory.{$OwnedSector}" exact="table[$TerritoryKey = $TerritoryKey, $TerritoryEntry = $TerritoryEntry]" />
+                        <set_value name="global.$MKFactionData.$AllTerritories.{$TerritoryKey}" exact="$TerritoryEntry" />
+                    </do_for_each>
+                </do_for_each>
+
+                <do_for_each name="$TerritoryKey" valuename="$TerritoryEntry" in="$NewFactionEntry.$OwnedTerritories">
+                    <do_for_each name="$OwnedSector" in="$TerritoryEntry.$Sectors">
+                        <set_value name="global.$MKFactionData.$SectorToTerritory.{$OwnedSector}" exact="table[$TerritoryKey = $TerritoryKey, $TerritoryEntry = $TerritoryEntry]" />
+                        <set_value name="global.$MKFactionData.$AllTerritories.{$TerritoryKey}" exact="$TerritoryEntry" />
+                    </do_for_each>
+                </do_for_each>
+
+                <signal_cue_instantly cue="md.FactionLogic_NavGraph.InstantiateNavGraphs" />
+            </actions>
+        </cue>
+    </cues>
+</mdscript>

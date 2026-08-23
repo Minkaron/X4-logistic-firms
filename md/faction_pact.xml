@@ -1,0 +1,254 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mdscript name="MKFactionRework" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../libraries/md.xsd">
+    <cues>
+        <cue name="Init" mapeditor="false">
+            <delay exact="5min" />
+            <actions>
+                <debug_text text="'Initalizing Faction Rework!'" />
+                <do_if value="not global.$MKFactionData?">
+                    <set_value name="global.$MKFactionData" exact="table[]" />
+                    <signal_cue_instantly cue="md.FactionLogic_Territories.InstantiateTerritoryManagers" />
+                </do_if>
+            </actions>
+            <cues>
+                <cue name="SectorOwnershipChanged" instantiate="true">
+                    <conditions>
+                        <event_contained_sector_changed_true_owner space="player.galaxy" />
+                    </conditions>
+                    <actions>
+                        <debug_text text="'Ownership Changed!'" />
+                        <debug_text text="event.param" />
+                        <debug_text text="event.param2" />
+                        <debug_text text="event.param3" />
+                    </actions>
+                </cue>
+            </cues>
+        </cue>
+        <cue name="TestScript" instantiate="true">
+            <conditions>
+                <event_long_range_scan_sent object="player.entity" />
+            </conditions>
+            <actions>
+                <do_all chance="0">
+                    <set_value name="$Faction" exact="faction.terran" />
+                    <set_value name="$FactionEntry" exact="global.$MKFactionData.$Factions.{$Faction}" />
+                    <debug_text text="global.$MKFactionData.$AllTerritories.keys.count" />
+                    <debug_text text="$FactionEntry.$CostGraph.keys.count" />
+                    <do_for_each name="$Territory" in="$FactionEntry.$CostGraph">
+                        <debug_text text="loop.value" />
+                    </do_for_each>
+                </do_all>
+                <do_all chance="0">
+                    <do_for_each name="$Ter" in="global.$MKFactionData.$Factions.{faction.terran}.$OwnedTerritories">
+                        <debug_text text="$Ter" />
+                        <debug_text text="'Buyers Rank'" />
+                        <do_for_each name="$Ware" in="loop.value.$BuyOffers">
+                            <debug_text text="$Ware" />
+                            <debug_text text="global.$MKFactionData.$Factions.{faction.terran}.$OwnedTerritories.{$Ter}.$BuyOffers.{$Ware}" />
+                        </do_for_each>
+
+                        <debug_text text="'Sellers Rank'" />
+                        <do_for_each name="$Ware" in="loop.value.$SellOffers">
+                            <debug_text text="$Ware" />
+                            <debug_text text="global.$MKFactionData.$Factions.{faction.terran}.$OwnedTerritories.{$Ter}.$SellOffers.{$Ware}" />
+                        </do_for_each>
+                    </do_for_each>
+                </do_all>
+
+                <do_all chance="0">
+                    <find_sector name="$Sectors" multiple="true" space="player.galaxy" />
+                    <do_for_each name="$Faction" in="lookup.faction.list">
+                        <do_if value="$Faction == faction.player">
+                            <continue />
+                        </do_if>
+                        <do_all chance="100">
+                            <find_ship_by_true_owner name="$Ships" faction="$Faction" space="$Sectors" multiple="true"></find_ship_by_true_owner>
+                            <do_for_each name="$Ship" in="$Ships">
+                                <do_if value="$Ship.isjobship">
+                                    <release_commandeered_object object="$Ship" />
+                                    <cancel_all_orders object="$Ship" />
+                                    <remove_object_commander object="$Ship" />
+                                    <activate_job_ship_orders ship="$Ship" />
+                                    <debug_text text="'%s %s in %s has commander %s'.[$Ship.name, $Ship.idcode, $Ship.sector.name, if $Ship.commander.name? then $Ship.commander.name else 'none']" />
+                                    <debug_text text="$Ship.order.name" />
+                                    <debug_text text="$Ship.order.state" />
+                                    <debug_text text="$Ship.order.operation" />
+
+                                </do_if>
+                            </do_for_each>
+                        </do_all>
+
+                    </do_for_each>
+                </do_all>
+                <do_all chance="0">
+                    <find_ship_by_true_owner name="$Dart" faction="faction.player" space="player.galaxy" macro="macro.ship_gen_s_racer_01_a_macro" />
+                    <set_value name="$PrevSector" exact="$Dart.sector" />
+                    <set_value name="$Dest" exact="player.ship" />
+                    <get_jump_path component="$JumpRoute" multiple="true" uselocalhighways="false">
+                        <start object="$PrevSector"></start>
+                        <end object="$Dest"></end>
+                    </get_jump_path>
+                    <create_order object="$Dart" id="'MoveWait'" name="$NextGate">
+                        <param name="destination" value="[player.ship.sector, player.ship.position]" />
+                        <param name="timeout" value="1s" />
+                        <param name="gate" value="$JumpRoute" />
+                    </create_order>
+                    <do_for_each name="$Entry" in="$JumpRoute" counter="$Idx" chance="0">
+                        <do_if value="$Idx % 2">
+                            <debug_text text="'Exit %s in %s'.[$Entry.name, $Entry.sector.name]" />
+                        </do_if>
+                        <do_else>
+                            <debug_text text="'Entrance is %s in %s'.[$Entry.name, $Entry.sector.name]" />
+                            <create_position name="$GatePos" object="$Entry" space="$Entry.sector" />
+                            <create_order object="$Dart" id="'MoveWait'" name="$NextGate">
+                                <param name="destination" value="null" />
+                                <param name="timeout" value="1s" />
+                                <param name="gate" value="$Entry" />
+                            </create_order>
+                        </do_else>
+                    </do_for_each>
+                </do_all>
+                <do_all chance="0">
+                    <do_for_each name="$Faction" in="global.$MKFactionData.$Factions">
+                        <debug_text text="$Faction.name" />
+                        <do_if value="loop.value.$Firms?">
+                            <do_for_each name="$Firm" valuename="$FirmEntry" in="loop.value.$Firms">
+                                <destroy_group group="$FirmEntry.$Traders" />
+                                <cancel_cue cue="$FirmEntry" />
+                            </do_for_each>
+                            <set_value name="loop.value.$Firms" exact="table[]" />
+                        </do_if>
+                    </do_for_each>
+                </do_all>
+                <do_all chance="0">
+                    <signal_cue_instantly cue="md.FirmLogic.CreateFirm" />
+                </do_all>
+                <do_all chance="0">
+                    <do_for_each name="$Faction" valuename="$FactionEntry" in="global.$MKFactionData.$Factions">
+                        <find_ship_by_true_owner faction="$Faction" space="player.galaxy" checkoperational="true" multiple="true" name="$Ships"></find_ship_by_true_owner>
+                        <do_for_each name="$Ship" in="$Ships">
+                            <do_if value="$Ship.order.id == 'MoveWait'">
+                                <cancel_order order="$Ship.order" />
+                            </do_if>
+                            <do_for_each name="$Order" in="$Ship.orders">
+                                <do_if value="$Order.id == 'MoveWait'">
+                                    <edit_order_param order="$Order" param="timeout" value="1s" />
+                                </do_if>
+                            </do_for_each>
+                        </do_for_each>
+                    </do_for_each>
+                </do_all>
+                <do_all chance="100">
+                    <signal_cue_instantly cue="md.MK_MarketWatch.ResetCues" />
+                </do_all>
+                <do_all chance="0">
+                    <signal_cue_instantly cue="md.MK_MarketWatch.TestCue" />
+                </do_all>
+                <do_all chance="0">
+                    <do_for_each name="$Faction" valuename="$FactionEntry" in="global.$MKFactionData.$Factions">
+                        <do_if value="$FactionEntry.$Firms?">
+                            <do_for_each name="$Firm" valuename="$FirmEntry" in="$FactionEntry.$Firms">
+
+                            </do_for_each>
+                        </do_if>
+                    </do_for_each>
+                </do_all>
+                <do_all chance="0">
+                    <do_for_each name="$Faction" valuename="$FactionEntry" in="global.$MKFactionData.$Factions">
+                        <set_value name="$FactionEntry.$OwnedTerritories" exact="table[]" />
+                        <set_value name="$FactionEntry.$NeutralTerritories" exact="table[]" />
+                        <set_value name="$FactionEntry.$CostGraph" exact="table[]" />
+                        <run_actions ref="md.FactionLogic_Territories.OwnedTerritoryCreation">
+                            <param name="Faction" value="$Faction" />
+                            <param name="FactionEntry" value="$FactionEntry" />
+                        </run_actions>
+                        <run_actions ref="md.FactionLogic_Territories.NeutralTerritoryCreation">
+                            <param name="Faction" value="$Faction" />
+                            <param name="FactionEntry" value="$FactionEntry" />
+                        </run_actions>
+                    </do_for_each>
+                    <do_for_each name="$Faction" valuename="$FactionEntry" in="global.$MKFactionData.$Factions">
+                        <do_for_each name="$TerritoryKey" valuename="$TerritoryEntry" in="global.$MKFactionData.$Factions.{$Faction}.$OwnedTerritories">
+                            <do_for_each name="$Sector" in="$TerritoryEntry.$Sectors">
+                                <set_value name="global.$MKFactionData.$SectorToTerritory.{$Sector}" exact="table[$TerritoryKey = $TerritoryKey, $TerritoryEntry = $TerritoryEntry]" />
+                                <set_value name="global.$MKFactionData.$AllTerritories.{$TerritoryKey}" exact="$TerritoryEntry" />
+                            </do_for_each>
+                        </do_for_each>
+                    </do_for_each>
+                    <signal_cue_instantly cue="md.FactionLogic_NavGraph.InstantiateNavGraphs" />
+                </do_all>
+                <do_all chance="0">
+                    <do_for_each name="$Faction" valuename="$FactionEntry" in="global.$MKFactionData.$Factions">
+                        <get_ship_definition faction="$Faction" tags="[tag.builder]" macro="$Builder" multiple="true" />
+                        <find_sector trueowner="$Faction" name="$Sectors" multiple="true"></find_sector>
+                        <do_if value="$Builder.count and $Sectors.count">
+                            <do_all exact="5">
+                                <create_ship name="$CurrentShip" macro="$Builder.random" sector="$Sectors.random">
+                                    <owner exact="$Faction" overridenpc="true" />
+                                    <pilot>
+                                        <select tags="tag.aipilot" />
+                                        <skills>
+                                            <skill type="management" exact="10" />
+                                            <skill type="morale" exact="10" />
+                                            <skill type="piloting" exact="10" />
+                                            <skill type="engineering" exact="10" />
+                                            <skill type="boarding" exact="10" />
+                                        </skills>
+                                    </pilot>
+                                    <loadout>
+                                        <level exact="1" />
+                                    </loadout>
+                                    <people>
+                                        <fillpercent exact="100" />
+                                        <person role="service">
+                                            <select faction="$Faction" />
+                                        </person>
+                                    </people>
+                                </create_ship>
+                            </do_all>
+                        </do_if>
+                    </do_for_each>
+                </do_all>
+                <do_all chance="0">
+                    <debug_text text="'Running'" />
+                    <do_for_each name="$Faction" valuename="$FactionEntry" in="global.$MKFactionData.$Factions">
+                        <find_station_by_true_owner name="$Shipyards" faction="$Faction" space="player.galaxy" canbuildships="true" multiple="true" />
+                        <do_for_each name="$Shipyard" in="$Shipyards">
+                            <debug_text text="'Adding wares for %s %s in %s'.[$Shipyard.name, $Shipyard.idcode, $Shipyard.sector.name]" />
+                            <add_default_production_wares object="$Shipyard" lowerlimit="99" upperlimit="100" />
+                            <add_default_production_wares object="$Shipyard.buildstorage" lowerlimit="100" upperlimit="100" />
+                        </do_for_each>
+                    </do_for_each>
+                </do_all>
+                <do_all chance="0">
+                    <debug_text text="'Running'" />
+                    <do_for_each name="$Faction" valuename="$FactionEntry" in="global.$MKFactionData.$Factions">
+                        <find_station_by_true_owner name="$Stations" faction="$Faction" space="player.galaxy" multiple="true" />
+                        <do_for_each name="$Station" in="$Stations">
+                            <find_object_component name="$PausedModules" object="$Station" class="class.production" pausedmanually="true" multiple="true" />
+                            <do_for_each name="$Module" in="$PausedModules">
+                                <set_production_paused object="$Module" paused="false" />
+                            </do_for_each>
+                        </do_for_each>
+                    </do_for_each>
+                </do_all>
+                <do_all chance="0">
+                    <find_ship_by_true_owner faction="faction.xenon" space="player.galaxy" tag="[tag.military]" multiple="true" checkoperational="true" indestructible="false" groupname="$Ships" />
+                    <destroy_group group="$Ships" />
+                </do_all>
+                <do_all chance="0">
+                    <debug_text text="'Was %s count'.[global.$MKFactionData.$AllTerritories.keys.count]" />
+                    <clear_table table="global.$MKFactionData" />
+                    <signal_cue_instantly cue="md.FactionLogic_Territories.InstantiateTerritoryManagers" />
+                    <debug_text text="'Now %s count'.[global.$MKFactionData.$AllTerritories.keys.count]" />
+                </do_all>
+                <do_all chance="0">
+                    <do_for_each name="$Terr" in="global.$MKFactionData.$GlobalNavGraph">
+                        <debug_text text="'Checking %s'.[$Terr]" />
+                        <debug_text text="loop.value.$Neighbors.keys.list" />
+                    </do_for_each>
+                </do_all>
+            </actions>
+        </cue>
+    </cues>
+</mdscript>
