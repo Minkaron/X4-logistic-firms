@@ -1,0 +1,357 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mdscript name="FactionLogic_EconData" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../libraries/md.xsd">
+    <cues>
+        <cue name="InstantiateTerritoryEconData" instantiate="true">
+            <conditions>
+                <event_cue_signalled />
+            </conditions>
+            <actions>
+                <do_for_each name="$Faction" valuename="$FactionEntry" in="global.$MKFactionData.$Factions">
+                    <do_for_each name="$TerritoryKey" valuename="$TerritoryData" in="$FactionEntry.$OwnedTerritories">
+                        <signal_cue_instantly cue="EstablishTerritoryEconData" param="[$Faction, $FactionEntry, $TerritoryData]" />
+                        <signal_cue_instantly cue="CheckForShipProduction" param="[$Faction, $FactionEntry, $TerritoryData]" />
+                    </do_for_each>
+                </do_for_each>
+            </actions>
+        </cue>
+        <cue name="EstablishTerritoryEconData" instantiate="true">
+            <conditions>
+                <event_cue_signalled />
+            </conditions>
+            <actions>
+                <set_value name="$Faction" exact="event.param.{1}" />
+                <set_value name="$FactionEntry" exact="event.param.{2}" />
+                <set_value name="$Territory" exact="event.param.{3}" />
+                <set_value name="$Sectors" exact="$Territory.$Sectors" />
+                <set_value name="$Territory.$BuyOffers" exact="table[]" />
+                <set_value name="$Territory.$SellOffers" exact="table[]" />
+
+                <set_value name="$BuyList" exact="[]" />
+                <set_value name="$SellList" exact="[]" />
+
+                <do_for_each name="$Sector" in="$Sectors">
+                    <find_buy_offer result="$BuyOffers" space="$Sector" multiple="true">
+                        <match_buyer>
+                            <match ishostileto="$Faction" negate="true" />
+                        </match_buyer>
+                    </find_buy_offer>
+
+                    <find_sell_offer result="$SellOffers" space="$Sector" multiple="true">
+                        <match_seller>
+                            <match ishostileto="$Faction" negate="true" />
+                        </match_seller>
+                    </find_sell_offer>
+                    <append_list_elements name="$BuyList" other="$BuyOffers" />
+                    <append_list_elements name="$SellList" other="$SellOffers" />
+                </do_for_each>
+
+                <do_for_each name="$BuyOffer" in="$BuyList">
+                    <run_actions ref="ScoreTrade" result="$BuyResult">
+                        <param name="TradeType" value="'Buy'" />
+                        <param name="TradeRef" value="$BuyOffer" />
+                    </run_actions>
+                    <do_if value="not $Territory.$BuyOffers.{$BuyOffer.ware}?">
+                        <set_value name="$Territory.$BuyOffers.{$BuyOffer.ware}" exact="table[$WareAvgs = [$BuyResult.{1}, $BuyResult.{2}, $BuyResult.{3}], $Count = 1]" />
+                    </do_if>
+                    <do_else>
+                        <set_value name="$WareEntry" exact="$Territory.$BuyOffers.{$BuyOffer.ware}" />
+                        <set_value name="$WareCount" exact="$WareEntry.$Count + 1" />
+                        <set_value name="$SatAvg" exact="$WareEntry.$WareAvgs.{1}" />
+                        <set_value name="$RelAvg" exact="$WareEntry.$WareAvgs.{2}" />
+                        <set_value name="$AmoAvg" exact="$WareEntry.$WareAvgs.{3}" />
+
+                        <set_value name="$NewSatAvg" exact="$SatAvg + ($BuyResult.{1} - $SatAvg) / $WareCount" />
+                        <set_value name="$NewRelAvg" exact="$RelAvg + ($BuyResult.{2} - $RelAvg) / $WareCount" />
+                        <set_value name="$NewAmoAvg" exact="$AmoAvg + ($BuyResult.{3} - $RelAvg) / $WareCount" />
+                        <set_value name="$NewAvgs" exact="table[$WareAvgs = [$NewSatAvg, $NewRelAvg, $NewAmoAvg], $Count = $WareCount]" />
+                        <set_value name="$Territory.$BuyOffers.{$BuyOffer.ware}" exact="$NewAvgs" />
+                    </do_else>
+
+
+                </do_for_each>
+                <do_for_each name="$SellOffer" in="$SellList">
+                    <run_actions ref="ScoreTrade" result="$SellResult">
+                        <param name="TradeType" value="'Sell'" />
+                        <param name="TradeRef" value="$SellOffer" />
+                    </run_actions>
+                    <do_if value="not $Territory.$SellOffers.{$SellOffer.ware}?">
+                        <set_value name="$Territory.$SellOffers.{$SellOffer.ware}" exact="table[$WareAvgs = [$SellResult.{1}, $SellResult.{2}, $SellResult.{3}], $Count = 1]" />
+                    </do_if>
+                    <do_else>
+                        <set_value name="$WareEntry" exact="$Territory.$SellOffers.{$SellOffer.ware}" />
+                        <set_value name="$WareCount" exact="$WareEntry.$Count + 1" />
+                        <set_value name="$SatAvg" exact="$WareEntry.$WareAvgs.{1}" />
+                        <set_value name="$RelAvg" exact="$WareEntry.$WareAvgs.{2}" />
+                        <set_value name="$AmoAvg" exact="$WareEntry.$WareAvgs.{3}" />
+
+                        <set_value name="$NewSatAvg" exact="$SatAvg + (($SellResult.{1} - $SatAvg) / $WareCount)" />
+                        <set_value name="$NewRelAvg" exact="$RelAvg + (($SellResult.{2} - $RelAvg) / $WareCount)" />
+                        <set_value name="$NewAmoAvg" exact="$AmoAvg + ($BuyResult.{3} - $AmoAvg) / $WareCount" />
+                        <set_value name="$NewAvgs" exact="table[$WareAvgs = [$NewSatAvg, $NewRelAvg, $NewAmoAvg], $Count = $WareCount]" />
+                        <set_value name="$Territory.$SellOffers.{$SellOffer.ware}" exact="$NewAvgs" />
+                    </do_else>
+                </do_for_each>
+
+            </actions>
+        </cue>
+        <library name="ScoreTrade" purpose="run_actions">
+            <params>
+                <param name="TradeType" />
+                <param name="TradeRef" />
+            </params>
+            <actions>
+                <do_if value="$TradeType == 'Buy'">
+                    <set_value name="$Ware" exact="$TradeRef.ware" />
+                    <set_value name="$WareMinVolume" exact="$Ware.volume" />
+                    <set_value name="$Amount" exact="$TradeRef.offeramount" />
+                    <set_value name="$WantedVolume" exact="$TradeRef.offervolume" />
+                    <set_value name="$StationCargoMax" exact="$TradeRef.owner.cargo.{$Ware}.max" />
+                    <set_value name="$StationVolumeMax" exact="($StationCargoMax * $WareMinVolume)f" />
+                    <do_if value="not $StationVolumeMax">
+                        <set_value name="$StationVolumeMax" exact="$WantedVolume" />
+                    </do_if>
+
+                    <set_value name="$SaturationScore" exact="($WantedVolume / $StationVolumeMax)f" />
+                    <set_value name="$RelativePriceScore" exact="($TradeRef.relativeprice + 1) / 2" />
+                    <set_value name="$AmountScore" exact="($Amount / $WareMinVolume)f" />
+
+                </do_if>
+                <do_elseif value="$TradeType == 'Sell'">
+                    <set_value name="$Ware" exact="$TradeRef.ware" />
+                    <set_value name="$WareMinVolume" exact="$Ware.volume" />
+                    <set_value name="$SellingVolume" exact="$TradeRef.offervolume" />
+                    <set_value name="$Amount" exact="$TradeRef.offeramount" />
+                    <set_value name="$StationCargoMax" exact="$TradeRef.owner.cargo.{$Ware}.max" />
+                    <set_value name="$StationVolumeMax" exact="($StationCargoMax * $WareMinVolume)f" />
+
+                    <set_value name="$SaturationScore" exact="($SellingVolume / $StationVolumeMax)f" />
+                    <set_value name="$RelativePriceScore" exact="1 - ($TradeRef.relativeprice + 1) / 2" />
+                    <set_value name="$AmountScore" exact="($Amount / $WareMinVolume)f" />
+
+                </do_elseif>
+                <do_else>
+                    <debug_text text="'Error in Score trade! TradeType is %s'.[$TradeType]" />
+                </do_else>
+                <return value="[$SaturationScore, $RelativePriceScore, $AmountScore]" />
+            </actions>
+        </library>
+        <cue name="CheckForShipProduction" instantiate="true">
+            <conditions>
+                <event_cue_signalled />
+            </conditions>
+            <actions>
+                <set_value name="$Faction" exact="event.param.{1}" />
+                <set_value name="$FactionEntry" exact="event.param.{2}" />
+                <set_value name="$Territory" exact="event.param.{3}" />
+                <find_station_by_true_owner name="$ShipProducers" faction="$Faction" space="$Territory.$Sectors" multiple="true" canbuildships="true"></find_station_by_true_owner>
+                <do_for_each in="$ShipProducers">
+                    <do_if value="loop.element.isshipyard">
+                        <set_value name="$Territory.$HasShipyard" exact="loop.element" />
+                    </do_if>
+                    <do_if value="loop.element.iswharf">
+                        <set_value name="$Territory.$HasWharf" exact="loop.element" />
+                    </do_if>
+                </do_for_each>
+            </actions>
+        </cue>
+        <!-- [$Trade, $TargetTerritoryEntry, $TargetTerritoryEntry.$Sectors.{1}.trueowner, $TargetWare, $AmountRank, $ArbitrageRank, $SortedBuyOffers.count] -->
+        <cue name="UpdateBuyTradeScore" instantiate="true">
+            <conditions>
+                <event_object_signalled object="player.galaxy" param="'Buying'" />
+            </conditions>
+            <actions>
+
+                <set_value name="$Trade" exact="event.param2.{1}" />
+                <set_value name="$Owner" exact="$Trade.owner" />
+
+                <set_value name="$TerEntry" exact="event.param2.{2}" />
+
+                <do_if value="not $TerEntry.$TerritoryKey?">
+                    <debug_text text="'Invalid entry for trade buy update! %s'.[$TerEntry]" />
+                </do_if>
+
+                <set_value name="$Ware" exact="event.param2.{4}" />
+                <set_value name="$Count" exact="event.param2.{7}" />
+
+                <do_if value="$Count">
+                    <set_value name="$WareMinVolume" exact="$Ware.volume" />
+                    <set_value name="$WantedVolume" exact="$Trade.offervolume" />
+                    <set_value name="$StationCargoMax" exact="$Owner.cargo.{$Ware}.max" />
+                    <set_value name="$StationVolumeMax" exact="($StationCargoMax * $WareMinVolume)f" />
+                    <do_if value="not $StationVolumeMax">
+                        <set_value name="$StationVolumeMax" exact="$WantedVolume" />
+                    </do_if>
+
+                    <set_value name="$SatScore" exact="($WantedVolume / $StationVolumeMax)f" />
+
+                    <do_if value="not $TerEntry.$BuyOffers.{$Ware}? and not $TerEntry.$BuyOffers.{$Ware}.$WareAvgs?">
+                        <set_value name="$TerEntry.$BuyOffers.{$Ware}" exact="table[]" />
+                        <set_value name="$TerEntry.$BuyOffers.{$Ware}" exact="table[$WareAvgs = [$SatScore, event.param2.{6}, event.param2.{5}], $Count = $Count]" />
+                    </do_if>
+                    <do_else>
+                        <set_value name="$PrevAvgs" exact="$TerEntry.$BuyOffers.{$Ware}" />
+                        <do_if value="not $PrevAvgs.$WareAvgs.{1}?">
+                            <remove_value name="$TerEntry.$BuyOffers.{$Ware}" />
+                            <debug_text text="'Invalid BuyOffers'" />
+                            <cancel_cue cue="this" />
+                        </do_if>
+                        <do_else>
+                            <set_value name="$PrevSat" exact="$PrevAvgs.$WareAvgs.{1}" />
+                            <set_value name="$PrevRel" exact="$PrevAvgs.$WareAvgs.{2}" />
+                            <set_value name="$PrevAmo" exact="$PrevAvgs.$WareAvgs.{3}" />
+
+                            <set_value name="$NewSatAvg" exact="$PrevSat + ($SatScore - $PrevSat) / $Count" />
+                            <set_value name="$NewRelAvg" exact="$PrevRel + (event.param2.{6} - $PrevRel) / $Count" />
+                            <set_value name="$NewAmoAvg" exact="$PrevAmo + (event.param2.{5} - $PrevAmo) / $Count" />
+                            <set_value name="$PrevAvgs" exact="table[$WareAvgs = [$NewSatAvg, $NewRelAvg, $NewAmoAvg], $Count = $Count]" />
+                        </do_else>
+                    </do_else>
+                </do_if>
+            </actions>
+        </cue>
+        <cue name="UpdateSellTradeScore" instantiate="true">
+            <conditions>
+                <event_object_signalled object="player.galaxy" param="'Selling'" />
+            </conditions>
+            <actions>
+                <set_value name="$Trade" exact="event.param2.{1}" />
+                <set_value name="$Owner" exact="$Trade.owner" />
+
+                <set_value name="$TerEntry" exact="event.param2.{2}" />
+                <do_if value="not $TerEntry.$TerritoryKey?">
+                    <debug_text text="'Invalid entry for trade buy update! %s'.[$TerEntry]" />
+                </do_if>
+
+                <set_value name="$Ware" exact="event.param2.{4}" />
+                <set_value name="$Count" exact="event.param2.{7}" />
+
+                <do_if value="$Count">
+                    <set_value name="$WareMinVolume" exact="$Ware.volume" />
+                    <set_value name="$SellingVolume" exact="$Trade.offervolume" />
+                    <set_value name="$StationCargoMax" exact="$Owner.cargo.{$Ware}.max" />
+                    <set_value name="$StationVolumeMax" exact="($StationCargoMax * $WareMinVolume)f" />
+
+                    <set_value name="$SatScore" exact="($SellingVolume / $StationVolumeMax)f" />
+
+                    <do_if value="not $TerEntry.$SellOffers.{$Ware}? and not $TerEntry.$SellOffers.{$Ware}.$WareAvgs?">
+                        <set_value name="$TerEntry.$SellOffers.{$Ware}" exact="table[]" />
+                        <set_value name="$TerEntry.$SellOffers.{$Ware}" exact="table[$WareAvgs = [$SatScore, event.param2.{6}, event.param2.{5}], $Count = $Count]" />
+                    </do_if>
+                    <do_else>
+                        <set_value name="$PrevAvgs" exact="$TerEntry.$SellOffers.{$Ware}" />
+                        <do_if value="not $PrevAvgs.$WareAvgs.{1}?">
+                            <remove_value name="$TerEntry.$SellOffers.{$Ware}" />
+                            <debug_text text="'Invalid SellOffers'" />
+                            <cancel_cue cue="this" />
+                        </do_if>
+                        <do_else>
+                            <set_value name="$PrevSat" exact="$PrevAvgs.$WareAvgs.{1}" />
+                            <set_value name="$PrevRel" exact="$PrevAvgs.$WareAvgs.{2}" />
+                            <set_value name="$PrevAmo" exact="$PrevAvgs.$WareAvgs.{3}" />
+
+                            <set_value name="$NewSatAvg" exact="$PrevSat + ($SatScore - $PrevSat) / $Count" />
+                            <set_value name="$NewRelAvg" exact="$PrevRel + (event.param2.{6} - $PrevRel) / $Count" />
+                            <set_value name="$NewAmoAvg" exact="$PrevAmo + (event.param2.{5} - $PrevAmo) / $Count" />
+                            <set_value name="$PrevAvgs" exact="table[$WareAvgs = [$NewSatAvg, $NewRelAvg, $NewAmoAvg], $Count = $Count]" />
+                        </do_else>
+                    </do_else>
+                </do_if>
+            </actions>
+        </cue>
+        <cue name="TraceTerritorieshortages" instantiate="true">
+            <conditions>
+                <event_cue_signalled />
+            </conditions>
+            <actions>
+                <debug_text text="'Shortage data'" />
+                <set_value name="$Faction" exact="event.param.{1}" />
+                <set_value name="$FactionEntry" exact="event.param.{2}" />
+                <set_value name="$TerritoryKey" exact="event.param.{3}" />
+                <set_value name="$TerritoryValue" exact="event.param.{4}" />
+                <set_value name="$Station" exact="event.param.{5}" />
+                <generate_shortage_reports object="$Station" shortage="$WareShortage" insufficient="$WareInsufficient" type="class.buildmodule" />
+                <do_if value="$WareShortage?">
+                    <run_actions ref="CheckTerritoryDeals" result="$LocalTerritoriesurplus">
+                        <param name="Faction" value="$Faction" />
+                        <param name="FactionEntry" value="$FactionEntry" />
+                        <param name="TerritoryValue" value="$TerritoryValue" />
+                        <param name="WareList" value="$WareShortage" />
+                        <param name="DealType" value="'surplus'" />
+                    </run_actions>
+                    <do_if value="$LocalTerritoriesurplus.count gt 0">
+                        <debug_text text="'Valid owning Territory trades found'" />
+                    </do_if>
+                    <do_else>
+                        <debug_text text="'No local deals! Checking other Territories'" />
+                        <do_for_each name="$OtherTerritoryKey" valuename="$OtherTerritoryValue" in="$FactionEntry.$OwnedTerritories">
+                            <do_if value="$OtherTerritoryKey == $TerritoryKey">
+                                <continue />
+                            </do_if>
+                            <set_value name="$Route" exact="$FactionEntry.$NavGraph.{$TerritoryKey}.$To.{$OtherTerritoryKey}" />
+                            <do_if value="$Route.$TotalCost lt 10">
+                                <run_actions ref="CheckTerritoryDeals" result="$OtherTerritoriesurplus">
+                                    <param name="Faction" value="$Faction" />
+                                    <param name="FactionEntry" value="$FactionEntry" />
+                                    <param name="TerritoryValue" value="$OtherTerritoryValue" />
+                                    <param name="WareList" value="$WareShortage" />
+                                    <param name="DealType" value="'surplus'" />
+                                </run_actions>
+                                <do_if value="$OtherTerritoriesurplus.count gt 0">
+                                    <debug_text text="'Nearby Territory surplus found!'" />
+                                    <do_for_each name="$Trade" in="$OtherTerritoriesurplus">
+                                        <debug_text text="'Selling %s for unit price %s'.[$Trade.$Amount, $Trade.$UnitPrice]" />
+                                    </do_for_each>
+                                    <break />
+                                </do_if>
+                            </do_if>
+                        </do_for_each>
+                    </do_else>
+                </do_if>
+            </actions>
+        </cue>
+        <library name="CheckTerritoryDeals" purpose="run_actions">
+            <params>
+                <param name="Faction" />
+                <param name="FactionEntry" />
+                <param name="TerritoryValue" />
+                <param name="WareList" />
+                <param name="DealType" comment="a string representing type: 'surplus' or 'deficit'" />
+            </params>
+            <actions>
+                <set_value name="$ViableTrades" exact="[]" />
+                <do_if value="$DealType == 'surplus'">
+                    <do_for_each name="$Ware" in="$WareList">
+                        <do_if value="$TerritoryValue.$SellOffers.{$Ware}?">
+                            <do_for_each name="$Trade" in="$TerritoryValue.$SellOffers.{$Ware}">
+                                <do_if value="$Trade.$TradeRef.restriction.factions.indexof.{$Faction}">
+                                    <debug_text text="'Nevermind! Faction is restricted from trade!'" />
+                                </do_if>
+                                <do_else>
+                                    <debug_text text="'It is station %s owned by %s'.[$Trade.$TradeRef.seller.name, $Trade.$TradeRef.seller.trueowner]" />
+                                    <append_to_list name="$ViableTrades" exact="$Trade" />
+                                </do_else>
+                            </do_for_each>
+                        </do_if>
+                    </do_for_each>
+                </do_if>
+                <do_elseif value="$DealType == 'deficit'">
+                    <do_for_each name="$Ware" in="$WareList">
+                        <do_if value="$TerritoryValue.$BuyOffers.{$Ware}?">
+                            <do_for_each name="$Trade" in="$TerritoryValue.$BuyOffers.{$Ware}">
+                                <do_if value="$Trade.$TradeRef.restriction.factions.indexof.{$Faction}">
+                                    <debug_text text="'Nevermind! Faction is restricted from trade!'" />
+                                </do_if>
+                                <do_else>
+                                    <debug_text text="'It is station %s owned by %s'.[$Trade.$TradeRef.buyer.name, $Trade.$TradeRef.buyer.trueowner]" />
+                                    <append_to_list name="$ViableTrades" exact="$Trade" />
+                                </do_else>
+                            </do_for_each>
+                        </do_if>
+                    </do_for_each>
+                </do_elseif>
+                <return value="$ViableTrades" />
+            </actions>
+        </library>
+    </cues>
+</mdscript>
+        
