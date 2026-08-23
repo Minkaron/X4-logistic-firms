@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<aiscript name="lib.plot.astar" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../libraries/aiscripts.xsd">
+    <params>
+        <param name="RefObject" default="this.assignedcontrolled" comment="Reference object" />
+        <param name="Start" />
+        <param name="End" />
+        <param name="PriorityQueue" default="table[]" />
+        <param name="Previous" default="table[]" />
+        <param name="Cost" default="table[]" />
+    </params>
+    <attention min="unknown">
+        <actions>
+            <set_value name="$FactionKey" exact="'$' + $RefObject.trueowner.id" />
+            <set_value name="$MKFactionData" exact="global.$MKFactionData.{$FactionKey}" />
+            <set_value name="$PriorityQueue.{$Start}" exact="0" />
+            <set_value name="$Previous.{$Start}" exact="null" />
+            <set_value name="$Cost.{$Start}" exact="0" />
+            <do_while value="$PriorityQueue.keys.count != 0">
+                <wait min="150ms" max="1s" />
+                <set_value name="$CurrentSector" exact="$PriorityQueue.keys.sorted.{1}" />
+                <do_if value="$CurrentSector == $End">
+                    <set_value name="$Previous.$Start" exact="$Start" />
+                    <set_value name="$Previous.$End" exact="$CurrentSector" />
+                    <return value="[$Previous, $Cost]" />
+                </do_if>
+                <find_sector_in_range name="$NeighborSectors" object="$CurrentSector" maxdistance="1" multiple="true" />
+                <do_for_each name="$Neighbor" in="$NeighborSectors">
+                    <set_value name="$ThreatScore" exact="1" />
+                    <set_value name="$NeighborOwner" exact="$Neighbor.trueowner" />
+                    <do_if value="$NeighborOwner.hasrelation.enemy.{$Start.trueowner} and not $NeighborOwner.hasrelation.killmilitary.{$Start.trueowner}">
+                        <set_value name="$ThreatScore" exact="5" />
+                    </do_if>
+                    <do_elseif value="$NeighborOwner.hasrelation.enemy.{$Start.trueowner} or $NeighborOwner.relationto.{$Start.trueowner} le -0.032">
+                        <set_value name="$ThreatScore" exact="100" />
+                        <do_if value="$MKFactionData.$Espionage.$KnownRecon.{$Neighbor}?">
+                            <set_value name="$IntelScore" exact="$MKFactionData.$Espionage.$KnownRecon.{$Neighbor}.$ThreatScore" />
+                            <set_value name="$ThreatScore" exact="$IntelScore + $ThreatScore" />
+                        </do_if>
+                        <continue />
+                    </do_elseif>
+                    <set_value name="$NeighborCost" exact="$Cost.{$CurrentSector} + $ThreatScore" />
+                    <do_if value="not $Cost.{$Neighbor}? or $NeighborCost lt $Cost.{$Neighbor}">
+                        <set_value name="$Cost.{$Neighbor}" exact="$NeighborCost" />
+                        <find_sector_in_range distances="$Distance" object="$Neighbor">
+                            <match_any excluded="$End" negate="true" />
+                        </find_sector_in_range>
+                        <set_value name="$Priority" exact="$NeighborCost + $Distance.{$Distance.keys.{1}}" />
+                        <set_value name="$PriorityQueue.{$Neighbor}" exact="$Priority" />
+                        <set_value name="$Previous.{$Neighbor}" exact="$CurrentSector" />
+                    </do_if>
+                </do_for_each>
+                <remove_value name="$PriorityQueue.{$CurrentSector}" />
+            </do_while>
+            <debug_text text="'Path from %s to %s failed!'.[$Start.name, $End.name]" />
+            <return value="'Failed!'" />
+        </actions>
+    </attention>
+</aiscript>
