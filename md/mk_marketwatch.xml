@@ -1,0 +1,386 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mdscript name="MK_MarketWatch" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../libraries/md.xsd">
+    <cues>
+        <cue name="InitEconMetrics">
+            <actions>
+                <debug_text text="'Initializing economic metrics'" />
+                <set_value name="$DebugDecision" exact="100" />
+                <set_value name="global.$MKMetrics" exact="table[]" />
+                <find_sector name="$Galaxy" space="player.galaxy" multiple="true" />
+                <shuffle_list list="$Galaxy" />
+                <do_for_each name="$Sector" in="$Galaxy">
+                    <set_value name="global.$MKMetrics.{$Sector}" exact="table[$EvalTime = 0]" />
+                </do_for_each>
+            </actions>
+        </cue>
+        <cue name="ResetCues" instantiate="true">
+            <conditions>
+                <event_cue_signalled />
+            </conditions>
+            <actions>
+                <debug_text text="'Reset cues called!'" />
+                <cancel_cue cue="SectorMetricsManager" />
+                <cancel_cue cue="RegionialMetricsManager" />
+
+                <reset_cue cue="InitEconMetrics" />
+                <reset_cue cue="SectorMetricsManager" />
+                <reset_cue cue="RegionialMetricsManager" />
+            </actions>
+        </cue>
+        <cue name="SectorMetricsManager">
+            <delay exact="5s" />
+            <actions>
+                <debug_text text="'Sector Metrics Manager Instantiated'" />
+            </actions>
+            <cues>
+                <cue name="RunSectorMetrics">
+                    <delay exact="1s" />
+                    <actions>
+                        <do_if value="not $PendingSectors?">
+                            <set_value name="$PendingSectors" exact="global.$MKMetrics.keys.list" />
+                        </do_if>
+                        <do_for_each name="$Sector" in="$PendingSectors" counter="$SectorIdx" reverse="true">
+                            <do_if value="player.age - global.$MKMetrics.{$Sector}.$EvalTime gt 5min">
+                                <signal_cue_instantly cue="MetricsThreadSetup" param="$Sector" />
+                            </do_if>
+                            <remove_value name="$PendingSectors.{$SectorIdx}" />
+                            <do_if value="$SectorIdx % 10 == 0">
+                                <break />
+                            </do_if>
+                        </do_for_each>
+                        <signal_cue cue="WaitSectorMetrics" />
+                    </actions>
+                </cue>
+                <cue name="WaitSectorMetrics" instantiate="true">
+                    <conditions>
+                        <event_cue_signalled />
+                    </conditions>
+                    <delay exact="2s" />
+                    <actions>
+                        <debug_text text="$PendingSectors.count" />
+                        <do_if value="$PendingSectors.count">
+                            <debug_text text="'Reseting metrics eval'" />
+                            <reset_cue cue="RunSectorMetrics" />
+                        </do_if>
+                        <do_else>
+                            <debug_text text="'Sector metrics finished'" />
+                            <remove_value name="$PendingSectors" />
+                            <signal_cue_instantly cue="RegionialMetricsManager" />
+                        </do_else>
+                    </actions>
+                </cue>
+                <cue name="MetricsThreadSetup" instantiate="true" namespace="this">
+                    <conditions>
+                        <event_cue_signalled />
+                    </conditions>
+                    <actions>
+                        <debug_text text="'Performing eval in %s'.[event.param]" chance="@$DebugDecision" />
+                        <set_value name="$Sector" exact="event.param" />
+                        <set_value name="$MetricEntry" exact="global.$MKMetrics.{$Sector}" />
+                        <set_value name="$MetricEntry.$EvalTime" exact="player.age" />
+                        <set_value name="$MetricEntry.$Wares" exact="table[]" />
+                    </actions>
+                    <cues>
+                        <cue name="StartMetricsThread">
+                            <delay exact="50ms" />
+                            <actions>
+                                <find_buy_offer result="$BuyOffers" multiple="true" space="$Sector" />
+                                <find_sell_offer result="$SellOffers" multiple="true" space="$Sector" />
+                                <signal_cue_instantly cue="ProcessBuyTrades" />
+                            </actions>
+                        </cue>
+                        <cue name="ProcessBuyTrades">
+                            <conditions>
+                                <event_cue_signalled />
+                            </conditions>
+                            <delay exact="50ms" />
+                            <actions>
+                                <do_for_each name="$BuyTrade" in="$BuyOffers">
+                                    <do_if value="$BuyTrade.available and $BuyTrade.amount">
+                                        <do_if value="not $MetricEntry.$Wares.{$BuyTrade.ware}?">
+                                            <set_value name="$MetricEntry.$Wares.{$BuyTrade.ware}" exact="table[$Supply = table[], $Demand = table[]]" />
+                                        </do_if>
+                                        <set_value name="$DemandEntry" exact="$MetricEntry.$Wares.{$BuyTrade.ware}.$Demand" />
+                                        <set_value name="$DemandEntry.{$BuyTrade.owner}" exact="$BuyTrade" />
+                                    </do_if>
+                                </do_for_each>
+                                <signal_cue_instantly cue="ProcessSellTrades" />
+                            </actions>
+                        </cue>
+                        <cue name="ProcessSellTrades">
+                            <conditions>
+                                <event_cue_signalled />
+                            </conditions>
+                            <delay exact="50ms" />
+                            <actions>
+                                <do_for_each name="$SellTrade" in="$SellOffers">
+                                    <do_if value="$SellTrade.available and $SellTrade.amount">
+                                        <do_if value="not $MetricEntry.$Wares.{$SellTrade.ware}?">
+                                            <set_value name="$MetricEntry.$Wares.{$SellTrade.ware}" exact="table[$Supply = table[], $Demand = table[]]" />
+                                        </do_if>
+                                        <set_value name="$SellEntry" exact="$MetricEntry.$Wares.{$SellTrade.ware}.$Supply" />
+                                        <set_value name="$SellEntry.{$SellTrade.owner}" exact="$SellTrade" />
+                                    </do_if>
+                                </do_for_each>
+                                <signal_cue_instantly cue="FinalizeMetrics" />
+                            </actions>
+                        </cue>
+                        <cue name="FinalizeMetrics">
+                            <conditions>
+                                <event_cue_signalled />
+                            </conditions>
+                            <delay exact="50ms" />
+                            <actions>
+                                <create_list name="$Totals" />
+                                <append_list_elements name="$Totals" other="$MetricEntry.$Wares.keys.list" />
+                                <do_for_each name="$Ware" in="$Totals">
+                                    <set_value name="$TotalDemand" exact="0" />
+                                    <set_value name="$CurrentDemand" exact="0" />
+                                    <set_value name="$TotalDemandPrice" exact="0" />
+                                    <set_value name="$AverageDemandPrice" exact="0" />
+                                    <do_for_each name="$Station" valuename="$Trade" in="$MetricEntry.$Wares.{$Ware}.$Demand">
+                                        <set_value name="$TotalDemand" exact="$TotalDemand + $Trade.offeramount" />
+                                        <set_value name="$CurrentDemand" exact="$CurrentDemand + $Trade.amount" />
+                                        <set_value name="$TotalDemandPrice" exact="$TotalDemandPrice + $Trade.price" />
+                                    </do_for_each>
+
+                                    <do_if value="$MetricEntry.$Wares.{$Ware}.$Demand.keys.count">
+                                        <set_value name="$AverageDemandPrice" exact="$TotalDemandPrice / [$CurrentDemand, 1].min" />
+                                    </do_if>
+
+                                    <set_value name="$TotalSupply" exact="0" />
+                                    <set_value name="$CurrentSupply" exact="0" />
+                                    <set_value name="$TotalSupplyPrice" exact="0" />
+                                    <set_value name="$AverageSupplyPrice" exact="0" />
+                                    <do_for_each name="$Station" valuename="$Trade" in="$MetricEntry.$Wares.{$Ware}.$Supply">
+                                        <set_value name="$TotalSupply" exact="$TotalSupply + $Trade.offeramount" />
+                                        <set_value name="$CurrentSupply" exact="$CurrentSupply + $Trade.amount" />
+                                        <set_value name="$TotalSupplyPrice" exact="$TotalSupplyPrice + $Trade.price" />
+                                    </do_for_each>
+
+                                    <do_if value="$MetricEntry.$Wares.{$Ware}.$Supply.keys.count">
+                                        <set_value name="$AverageSupplyPrice" exact="$TotalSupplyPrice / [$CurrentSupply, 1].min" />
+                                    </do_if>
+
+                                    <set_value name="$MetricEntry.$Wares.{$Ware}.$TotalDemand" exact="$TotalDemand" />
+                                    <set_value name="$MetricEntry.$Wares.{$Ware}.$CurrentDemand" exact="$CurrentDemand" />
+                                    <set_value name="$MetricEntry.$Wares.{$Ware}.$TotalDemandPrice" exact="$TotalDemandPrice" />
+                                    <set_value name="$MetricEntry.$Wares.{$Ware}.$AverageDemandPrice" exact="$AverageDemandPrice" />
+                                    <set_value name="$MetricEntry.$Wares.{$Ware}.$TotalSupply" exact="$TotalSupply" />
+                                    <set_value name="$MetricEntry.$Wares.{$Ware}.$CurrentSupply" exact="$CurrentSupply" />
+                                    <set_value name="$MetricEntry.$Wares.{$Ware}.$TotalSupplyPrice" exact="$TotalSupplyPrice" />
+                                    <set_value name="$MetricEntry.$Wares.{$Ware}.$AverageSupplyPrice" exact="$AverageSupplyPrice" />
+                                </do_for_each>
+                            </actions>
+                        </cue>
+                    </cues>
+                </cue>
+            </cues>
+        </cue>
+        <cue name="RegionialMetricsManager">
+            <conditions>
+                <event_cue_signalled />
+            </conditions>
+            <delay exact="1s" />
+            <actions>
+                <debug_text text="'Regional Metrics Manager Instantiated!'" />
+                <set_value name="$SectorCheck" exact="global.$MKMetrics.keys.list" />
+                <set_value name="$MaxDiffusionThreads" exact="30" />
+                <set_value name="$ActiveThreads" exact="0" />
+                <signal_cue cue="RegionalMetricsSetup" />
+            </actions>
+            <cues>
+                <cue name="RegionalMetricsSetup">
+                    <conditions>
+                        <event_cue_signalled />
+                    </conditions>
+                    <actions>
+                        <set_value name="$RegionStart" exact="player.age" />
+                        <do_for_each name="$Sector" valuename="$SectorEntry" in="global.$MKMetrics">
+                            <do_if value="not $SectorEntry.$Fields?">
+                                <set_value name="$SectorEntry.$Fields" exact="table[]" />
+                            </do_if>
+                            <do_for_each name="$Ware" valuename="$Entry" in="$SectorEntry.$Wares">
+                                <do_if value="not $SectorEntry.$Fields.{$Ware}?">
+                                    <set_value name="$SectorEntry.$Fields.{$Ware}" exact="table[]" />
+                                </do_if>
+                                <set_value name="$FieldEntry" exact="$SectorEntry.$Fields.{$Ware}" />
+                                <set_value name="$FieldEntry.$TDemand" exact="@$Entry.$TotalDemand" />
+                                <set_value name="$FieldEntry.$CDemand" exact="@$Entry.$CurrentDemand" />
+                                <set_value name="$FieldEntry.$AvgDPrice" exact="@$Entry.$AverageDemandPrice" />
+
+                                <set_value name="$FieldEntry.$TSupply" exact="@$Entry.$TotalSupply" />
+                                <set_value name="$FieldEntry.$CSupply" exact="@$Entry.$CurrentSupply" />
+                                <set_value name="$FieldEntry.$AvgSPrice" exact="@$Entry.$AverageSupplyPrice" />
+
+                            </do_for_each>
+                        </do_for_each>
+                        <signal_cue cue="RegionalDiffusionLoop" />
+                    </actions>
+                </cue>
+                <cue name="RegionalDiffusionLoop">
+                    <conditions>
+                        <event_cue_signalled />
+                    </conditions>
+                    <actions>
+                        <do_for_each name="$Sector" in="$SectorCheck">
+                            <signal_cue_instantly cue="DiffusionThreadSetup" param="$Sector" />
+                            <set_value name="$ActiveThreads" operation="add" />
+                        </do_for_each>
+                    </actions>
+                </cue>
+                <cue name="DiffusionThreadSetup" instantiate="true" namespace="this">
+                    <conditions>
+                        <event_cue_signalled />
+                    </conditions>
+                    <actions>
+                        <set_value name="$RegionalManager" exact="namespace.parent" />
+                        <set_value name="$ActiveThreadRef" exact="$RegionalManager.$ActiveThreads" />
+                        <set_value name="$Sector" exact="event.param" />
+                        <set_value name="$SectorEntry" exact="global.$MKMetrics.{$Sector}" />
+                        <set_value name="$ThreadStart" exact="player.age" />
+                        <find_sector_in_range name="$Neighbors" object="$Sector" maxdistance="1" multiple="true" />
+                    </actions>
+                    <cues>
+                        <cue name="StartDiffusion">
+                            <delay exact="1s" />
+                            <actions>
+                                <do_for_each name="$Neighbor" in="$Neighbors">
+                                    <set_value name="$NEntry" exact="global.$MKMetrics.{$Neighbor}" />
+                                    <do_for_each name="$Ware" valuename="$Entry" in="$NEntry.$Fields">
+                                        <do_if value="not $SectorEntry.$Fields.{$Ware}?">
+                                            <set_value name="$SectorEntry.$Fields.{$Ware}" exact="table[]" />
+                                        </do_if>
+                                    </do_for_each>
+                                </do_for_each>
+                                <signal_cue_instantly cue="DiffusionProcess" />
+                            </actions>
+                        </cue>
+                        <cue name="DiffusionProcess">
+                            <conditions>
+                                <event_cue_signalled />
+                            </conditions>
+                            <delay exact="150ms" />
+                            <actions>
+                                <do_for_each name="$Ware" valuename="$FieldEntry" in="$SectorEntry.$Fields">
+                                    <set_value name="$RunningTDemand" exact="0" />
+                                    <set_value name="$RunningCDemand" exact="0" />
+                                    <set_value name="$RunningAvgDPrice" exact="0" />
+
+                                    <set_value name="$RunningTSupply" exact="0" />
+                                    <set_value name="$RunningCSupply" exact="0" />
+                                    <set_value name="$RunningAvgSPrice" exact="0" />
+
+                                    <set_value name="$NeighborCount" exact="$Neighbors.count" />
+
+                                    <do_for_each name="$Neighbor" in="$Neighbors">
+                                        <do_if value="$Neighbor.trueowner.relationto.{$Sector.trueowner} le -0.15">
+                                            <set_value name="$NeighborCount" operation="subtract" />
+                                            <continue />
+                                        </do_if>
+                                        <set_value name="$NEntry" exact="global.$MKMetrics.{$Neighbor}" />
+                                        <do_if value="$NEntry.$Fields.{$Ware}?">
+                                            <set_value name="$WareEntry" exact="$NEntry.$Fields.{$Ware}" />
+
+                                            <set_value name="$RunningTDemand" exact="$RunningTDemand + @$WareEntry.$TDemand" />
+                                            <set_value name="$RunningCDemand" exact="$RunningCDemand + @$WareEntry.$CDemand" />
+                                            <set_value name="$RunningAvgDPrice" exact="$RunningAvgDPrice + @$WareEntry.$AvgDPrice" />
+
+                                            <set_value name="$RunningTSupply" exact="$RunningTSupply + @$WareEntry.$TSupply" />
+                                            <set_value name="$RunningCSupply" exact="$RunningCSupply + @$WareEntry.$CSupply" />
+                                            <set_value name="$RunningAvgSPrice" exact="$RunningAvgSPrice + @$WareEntry.$AvgSPrice" />
+                                        </do_if>
+                                    </do_for_each>
+
+                                    <set_value name="$NeighborCount" exact="[$NeighborCount, 1].min" />
+                                    <set_value name="$RunningTDemand" exact="($RunningTDemand / $NeighborCount)f" />
+                                    <set_value name="$RunningCDemand" exact="($RunningCDemand / $NeighborCount)f" />
+                                    <set_value name="$RunningAvgDPrice" exact="($RunningAvgDPrice / $NeighborCount)f" />
+
+                                    <set_value name="$RunningTSupply" exact="($RunningTSupply / $NeighborCount)f" />
+                                    <set_value name="$RunningCSupply" exact="($RunningCSupply / $NeighborCount)f" />
+                                    <set_value name="$RunningAvgSPrice" exact="($RunningAvgSPrice / $NeighborCount)f" />
+
+                                    <set_value name="$FieldEntry.$TempTDemand" exact="0.4 * $RunningTDemand + 0.6 * @$FieldEntry.$TDemand" />
+                                    <set_value name="$FieldEntry.$TempCDemand" exact="0.4 * $RunningCDemand + 0.6 * @$FieldEntry.$CDemand" />
+                                    <set_value name="$FieldEntry.$TempAvgDPrice" exact="0.4 * ($RunningAvgDPrice)f + 0.6 * (@$FieldEntry.$AvgDPrice)f" />
+
+                                    <set_value name="$FieldEntry.$TempTSupply" exact="0.4 * $RunningTSupply + 0.6 * @$FieldEntry.$TSupply" />
+                                    <set_value name="$FieldEntry.$TempCSupply" exact="0.4 * $RunningCSupply + 0.6 * @$FieldEntry.$CSupply" />
+                                    <set_value name="$FieldEntry.$TempAvgSPrice" exact="0.4 * ($RunningAvgSPrice)f + 0.6 * (@$FieldEntry.$AvgSPrice)f" />
+                                </do_for_each>
+                                <signal_cue cue="FinalizeDiffusion" />
+                            </actions>
+                        </cue>
+                        <cue name="FinalizeDiffusion">
+                            <conditions>
+                                <event_cue_signalled />
+                            </conditions>
+                            <actions>
+                                <set_value name="$ActiveThreadRef" operation="subtract" />
+                            </actions>
+                        </cue>
+                    </cues>
+                </cue>
+                <cue name="ApplyDiffusion" checktime="20s" checkinterval="10s">
+                    <conditions>
+                        <check_value value="$ActiveThreads == 0" />
+                    </conditions>
+                    <delay exact="5s" />
+                    <actions>
+                        <debug_text text="'Diffusion finished, finalizing!'" />
+                        <do_for_each name="$Sector" valuename="$SectorEntry" in="global.$MKMetrics">
+                            <do_for_each name="$Ware" valuename="$WareEntry" in="$SectorEntry.$Fields">
+
+                                <set_value name="$WareEntry.$TDemand" exact="$WareEntry.$TempTDemand" />
+                                <set_value name="$WareEntry.$CDemand" exact="$WareEntry.$TempCDemand" />
+                                <set_value name="$WareEntry.$AvgDPrice" exact="$WareEntry.$TempAvgDPrice" />
+
+                                <set_value name="$WareEntry.$TSupply" exact="$WareEntry.$TempTSupply" />
+                                <set_value name="$WareEntry.$CSupply" exact="$WareEntry.$TempCSupply" />
+                                <set_value name="$WareEntry.$AvgSPrice" exact="$WareEntry.$TempAvgSPrice" />
+                            </do_for_each>
+                        </do_for_each>
+                        <debug_text text="'Finished diffusion at %s'.[(player.age - $RegionStart).formatted.default]" />
+                    </actions>
+                </cue>
+                <cue name="WaitRegionalMetrics" instantiate="true">
+                    <conditions>
+                        <event_cue_signalled />
+                    </conditions>
+                    <delay exact="1s" />
+                    <actions>
+                        <do_if value="$PendingRegions.count">
+                            <debug_text text="$PendingRegions.count" />
+                            <reset_cue cue="RunRegionalMetrics" />
+                        </do_if>
+                        <do_else>
+                            <debug_text text="'Regional metrics finished'" />
+                            <remove_value name="$PendingRegions" />
+                            <signal_cue_instantly cue="CompatMetricsManager" />
+                        </do_else>
+                    </actions>
+                </cue>
+            </cues>
+        </cue>
+        <cue name="TestCue" instantiate="true">
+            <conditions>
+                <event_cue_signalled />
+            </conditions>
+            <actions>
+                <do_for_each name="$Sector" in="global.$MKMetrics">
+                    <debug_text text="'Looking at %s'.[$Sector.name]" />
+                    <set_value name="$Entry" exact="global.$MKMetrics.{$Sector}" />
+                    <do_for_each name="$Ware" in="$Entry.$Fields">
+                        <do_if value="loop.value.$TDemand gt 0">
+                            <debug_text text="'Demand for %s is %s with %s remaining need and unit price %s'.[$Ware.name, loop.value.$TDemand, loop.value.$CDemand, (loop.value.$AvgDPrice).formatted.default]" />
+                        </do_if>
+                        <do_if value="loop.value.$TSupply gt 0">
+                            <debug_text text="'Supply for %s is %s with %s remaining free and unit price %s'.[$Ware.name, loop.value.$TSupply, loop.value.$CSupply, (loop.value.$AvgSPrice).formatted.default]" />
+                        </do_if>
+                    </do_for_each>
+                </do_for_each>
+            </actions>
+        </cue>
+    </cues>
+</mdscript>
