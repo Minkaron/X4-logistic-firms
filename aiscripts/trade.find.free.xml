@@ -1,0 +1,809 @@
+<?xml version='1.0' encoding='utf-8'?>
+<diff>
+    <add sel="/aiscript/attention[@min='unknown']/actions/label[@name='find_sell_offers']" pos="before">
+        <!--<label name="checkcachedtrades" />
+
+        <set_value name="$Trades" exact="[]" />
+        <set_value name="$ForSale" exact="[]" />
+        <set_value name="$Faction" exact="this.trueowner" />
+        <set_value name="$FactionEntry" exact="@global.$MKFactionData.$Factions.{$Faction}" />
+        <set_value name="$WareFailCount" exact="0" />
+        <set_value name="$TimeStart" exact="player.age" />
+
+        <do_if value="not $DebugDecision?">
+            <set_value name="$DebugDecision" exact="0" />
+        </do_if>
+
+        <label name="StartEvalLoop" />
+
+        <do_if value="$FactionEntry == null">
+            <debug_text text="'Why are you alive? Your faction %s is GONE bro'.[this.trueowner.name]" />
+            <resume label="find_sell_offers" />
+        </do_if>
+
+        <set_value name="$CurrentSector" exact="this.sector" />
+        <set_value name="$CurrentTerritoryData" exact="global.$MKFactionData.$SectorToTerritory.{$CurrentSector}" />
+
+        <create_list name="$FilteredWareBasket" />
+
+        <do_if value="this.ship.cargo.list.count">
+            <do_for_each name="$Ware" in="this.ship.cargo.list" counter="$Index">
+                <do_if value="$warebasket.indexof.{$Ware}">
+                    <append_to_list name="$ForSale" exact="this.ship.cargo.list.{$Index}" />
+                </do_if>
+            </do_for_each>
+            <do_if value="$ForSale.count">
+                <set_value name="$FilteredWareBasket" exact="$ForSale" />
+            </do_if>
+        </do_if>
+        <do_if value="not $FilteredWareBasket.count">
+            <do_for_each name="$tempware" in="$warebasket">
+                </!/-/-/ also check that the we can carry it (max > 0) -/-/>/
+                <do_if value="this.ship.cargo.{$tempware}.max">
+                    <do_if value="($useuniversalstorage? and $minvolume.{-1} gt 0) or $minvolume.{$tempware.waretransport} gt 0">
+                        <do_if value="this.ship.cargo.{$tempware}.free gt (this.ship.cargo.{$tempware}.max / 10)">
+                            <set_value name="$FreeCargo" exact="this.ship.cargo.{$tempware}.free" />
+                            <set_value name="$IdealSeller" exact="$FreeCargo * $tempware.minprice" />
+                            <set_value name="$IdealBuyer" exact="$FreeCargo * $tempware.maxprice" />
+                            <set_value name="$IdealProfit" exact="$IdealBuyer - $IdealSeller" />
+                            <append_to_list name="$FilteredWareBasket" exact="[$tempware, $tempware.pricerange, $FreeCargo, $IdealSeller, $IdealBuyer, $IdealProfit ]" />
+                        </do_if>
+                    </do_if>
+                </do_if>
+                <do_else>
+                    <debug_text text="'%1 (job %2) can NOT transport %3 (Wrong $warebasket?). Do not try to buy'.[this.ship.knownname, this.ship.job, $tempware.name]" filter="error" />
+                </do_else>
+            </do_for_each>
+            <sort_list list="$FilteredWareBasket" sortbyvalue="loop.element.{6}" />
+        </do_if>
+
+
+        <do_for_each in="$FilteredWareBasket" chance="0">
+            <debug_text text="'Ware %s, pricerange %,s, amount %,s, seller %,s, buyer %,s, profit %,s'.[loop.element.{1}.name, loop.element.{2}, loop.element.{3}, loop.element.{4}, loop.element.{5}, loop.element.{6}]" chance="@$DebugDecision" />
+        </do_for_each>
+        <set_value name="$EvaluateStage" exact="'PickWare'" />
+
+        <label name="DecisionLoop" />
+
+        <do_if value="this.sector.name == 'Argon Prime'">
+            <set_value name="$DebugDecision" exact="0" />
+            <do_if value="not $StartAge?">
+                <set_value name="$StartAge" exact="player.age" />
+            </do_if>
+        </do_if>
+        <do_else>
+            <set_value name="$DebugDecision" exact="0" />
+        </do_else>
+        <do_if value="$EvaluateStage == 'PickWare'">
+            <do_if value="$WareFailCount ge 12">
+                <debug_text text="'Can\'t find any trades at all for %s %s in %s'.[this.ship.name, this.ship.idcode, this.sector.name]" chance="@$DebugDecision" />
+                <do_if value="$CurrentSector.trueowner == this.trueowner">
+                    <debug_text text="'%s %s in sector %s is lodging complaint with own faction %s!'.[this.ship.name, this.ship.idcode, this.sector.name, this.trueowner.name]" chance="@$DebugDecision" />
+                    <signal_objects object="player.galaxy" param="'TradeComplaint'" param2="[this, $CurrentTerritoryData.$TerritoryKey, $warebasket]" />
+                </do_if>
+                <resume label="finish" />
+            </do_if>
+            <do_if value="$ForSale.count">
+                <set_value name="$TargetWare" exact="$ForSale.last" />
+                <debug_text text="'TargetWare is %s and ForSale is now %s'.[$TargetWare, $ForSale]" chance="@$DebugDecision" />
+                <remove_value name="$ForSale.last" />
+                <set_value name="$CargoToSell" exact="this.ship.cargo.{$TargetWare}.count" />
+            </do_if>
+            <do_elseif value="$FilteredWareBasket.count">
+                <set_value name="$TargetWare" exact="$FilteredWareBasket.last.{1}" />
+                <debug_text text="'Picking ware %s for %s %s'.[$TargetWare, this.ship.name, this.ship.idcode]" chance="@$DebugDecision" />
+                <remove_value name="$FilteredWareBasket.last" />
+            </do_elseif>
+
+            <do_if value="$TargetWare?">
+                <do_if value="not $CargoToSell? and this.ship.cargo.{$TargetWare}.free == 0">
+                    <remove_value name="$TargetWare" />
+                    <set_value name="$EvaluateStage" exact="'Finished'" />
+                    <resume label="DecisionLoop" />
+                </do_if>
+                <set_value name="$EvaluateStage" exact="'FindBuyer'" />
+                <resume label="DecisionLoop" />
+            </do_if>
+            <do_else>
+                <debug_text text="'Can\'t find any valid wares for %s %s in %s'.[this.ship.name, this.ship.idcode, this.sector.name]" chance="@$DebugDecision" />
+                <resume label="finish" />
+            </do_else>
+        </do_if>
+        <do_elseif value="$EvaluateStage == 'ChangeWare'">
+            <do_if value="not $CheckedWares?">
+                <set_value name="$CheckedWares" exact="[]" />
+            </do_if>
+            <do_if value="$TargetWare?">
+                <append_to_list name="$CheckedWares" exact="$TargetWare" />
+            </do_if>
+            <debug_text text="'Checked wares: %s'.[$CheckedWares]" chance="@$DebugDecision" />
+            <remove_value name="$TargetWare" />
+            <do_if value="$ForSale.count">
+                <set_value name="$TargetWare" exact="$ForSale.last" />
+                <remove_value name="$ForSale.last" />
+                <debug_text text="'TargetWare is %s and ForSale is now %s'.[$TargetWare, $ForSale]" chance="@$DebugDecision" />
+                <set_value name="$CargoToSell" exact="this.ship.cargo.{$TargetWare}.count" />
+            </do_if>
+            <do_elseif value="$FilteredWareBasket.count">
+                <set_value name="$TargetWare" exact="$FilteredWareBasket.last.{1}" />
+                <debug_text text="'Picking ware %s for %s %s'.[$TargetWare, this.ship.name, this.ship.idcode]" chance="@$DebugDecision" />
+                <remove_value name="$FilteredWareBasket.last" />
+            </do_elseif>
+            <do_else>
+                <debug_text text="'No more valid entries in ForSale or FilteredWareBasket to pick from for %s %s!'.[this.ship.name, this.ship.idcode]" chance="@$DebugDecision" />
+                <debug_text text="'%s %s has already checked %s!'.[this.ship.name, this.ship.idcode, $CheckedWares]" chance="@$DebugDecision" />
+                <debug_text text="'Warebasket is typically %s'.[$warebasket]" chance="@$DebugDecision" />
+                <debug_text text="'WareFailCount is %s'.[$WareFailCount]" chance="@$DebugDecision" />
+                <do_for_each name="$Ware" in="this.ship.cargo.list">
+                    <do_if value="not $warebasket.indexof.{$Ware}">
+                        <drop_cargo object="this.assignedcontrolled" ware="$Ware" exact="this.assignedcontrolled.cargo.{$Ware}.count" />
+                    </do_if>
+                </do_for_each>
+                <do_if value="$WareFailCount ge 10">
+                    <do_for_each name="$Ware" in="this.ship.cargo.list">
+                        <debug_text text="'Dropping unsellable cargo %s'.[$Ware]" chance="@$DebugDecision" />
+                        <drop_cargo object="this.assignedcontrolled" ware="$Ware" exact="this.assignedcontrolled.cargo.{$Ware}.count" />
+                    </do_for_each>
+                </do_if>
+                <set_value name="$CheckedWares" exact="[]" />
+                <set_value name="$WareFailCount" operation="add" />
+                <resume label="StartEvalLoop" />
+            </do_else>
+
+            <do_if value="not $CargoToSell? and this.ship.cargo.{$TargetWare}.free == 0">
+                <set_value name="$EvaluateStage" exact="'Finished'" />
+                <resume label="DecisionLoop" />
+            </do_if>
+            <set_value name="$EvaluateStage" exact="'FindBuyer'" />
+            <resume label="DecisionLoop" />
+        </do_elseif>
+        <do_elseif value="$EvaluateStage == 'FindBuyer'">
+            <set_value name="$FindBuyerState" exact="'EvaluateOptions'" />
+            <resume label="FindBuyerSetup" />
+        </do_elseif>
+        <do_elseif value="$EvaluateStage == 'FindSeller'">
+            <set_value name="$FindSellerState" exact="'EvaluateOptions'" />
+            <resume label="FindSellerSetup" />
+        </do_elseif>
+        <do_elseif value="$EvaluateStage == 'Finished'">
+            <sort_list list="$Trades" sortbyvalue="loop.element.{7}" />
+
+            <do_if value="$CargoToSell?">
+                <debug_text text="'%s %s in %s has %s for sale'.[this.ship.name, this.ship.idcode, this.ship.sector.name, $CargoToSell]" chance="@$DebugDecision" />
+                <sort_list list="$Trades" sortbyvalue="loop.element.{1}" />
+                <set_value name="$buyoffer" exact="$Trades.last.{1}" />
+                <resume label="finish" />
+            </do_if>
+            <do_elseif value="$Trades.count and $Trades.last.{1}.ware? and $Trades.last.{2}.ware? and $Trades.last.{1}.ware == $Trades.last.{2}.ware">
+                <find_sell_offer result="$SellCheck" seller="$Trades.last.{2}.owner" wares="$Trades.last.{1}.ware" tradepartner="this.ship" />
+                <find_buy_offer result="$BuyCheck" buyer="$Trades.last.{1}.owner" wares="$Trades.last.{1}.ware" tradepartner="this.ship" />
+                <do_if value="@$SellCheck.available and @$SellCheck.amount gt 0 and @$BuyCheck.available and @$BuyCheck.amount gt 0">
+                    <debug_text text="'Started at %s now %s took %s to run'.[$StartAge, player.age, (player.age - $StartAge).formatted.default]" chance="@$DebugDecision" />
+                    <debug_text text="'Trade pair found for %s %s with buyer %s and seller %s'.[this.ship.name, this.ship.idcode, $Trades.last.{1}.owner.name, $Trades.last.{2}.owner.name]" chance="@$DebugDecision" />
+                    <debug_text text="'Buyer in %s and Seller in %s'.[global.$MKFactionData.$SectorToTerritory.{$Trades.last.{1}.owner.sector}.$TerritoryKey, global.$MKFactionData.$SectorToTerritory.{$Trades.last.{2}.owner.sector}.$TerritoryKey]" chance="@$DebugDecision" />
+                    <debug_text text="this.ship.name" chance="@$DebugDecision" />
+                    <set_value name="$buyoffer" exact="$Trades.last.{1}" />
+                    <set_value name="$selloffer" exact="$Trades.last.{2}" />
+                </do_if>
+
+                <resume label="finish" />
+            </do_elseif>
+            <do_else>
+                <do_if value="this.trueowner != faction.xenon">
+                    <debug_text text="'%s %s in %s with %s failed to find trades'.[this.ship.name, this.ship.idcode, this.ship.sector.name, $TargetWare]" chance="@$DebugDecision" />
+                </do_if>
+                <remove_value name="$UnexploredList" />
+                <remove_value name="$ExploredList" />
+                <remove_value name="$ExploredKeys" />
+                <set_value name="$Trades" exact="[]" />
+                <set_value name="$EvaluateStage" exact="'ChangeWare'" />
+                <do_if value="this.sector">
+                    <do_if value="not $AnchorPos?">
+                        <create_position name="$AnchorPos" space="this.sector" object="this.ship" />
+                    </do_if>
+
+                    <set_value name="$IdleTime" min="1s" max="5s" />
+                    <run_script name="'move.idle'">
+                        <param name="TimeOut" value="$IdleTime" />
+                        <param name="anchorpos_sector" value="$AnchorPos" />
+                    </run_script>
+                </do_if>
+                <do_else>
+                    <wait min="5ms" max="2s" />
+                </do_else>
+                <resume label="DecisionLoop" />
+            </do_else>
+        </do_elseif>
+
+
+        <label name="FindBuyerSetup" />
+        <set_value name="$TradeIndex" exact="0" />
+        <set_value name="$NavIndex" exact="0" />
+        <set_value name="$BuyOffersCount" exact="0" />
+        <set_value name="$TerritoryBuyOffers" exact="[]" />
+        <set_value name="$BuyRankTable" exact="table[]" />
+        <set_value name="$WareRankAvgs" exact="table[]" />
+        <set_value name="$AmountTolerance" exact="0f" />
+        <set_value name="$DistanceTolerance" exact="0f" />
+        <set_value name="$ArbitrageTolerance" exact="0f" />
+        <set_value name="$BuyerTolerance" exact="0f" />
+        <set_value name="$CheckedWare" exact="false" />
+
+        <do_if value="not global.$MKFactionData.$GlobalNavGraph.{$CurrentTerritoryData.$TerritoryKey}.$Neighbors?">
+            <debug_text text="'Error setting navtable'" />
+            <debug_text text="'Territory should be %s'.[global.$MKFactionData.$SectorToTerritory.{this.sector}.$TerritoryKey]" />
+            <debug_text text="'Key %s global graph entry %s in sector %s'.[$CurrentTerritoryData.$TerritoryKey, @global.$MKFactionData.$GlobalNavGraph.{$CurrentTerritoryData.$TerritoryKey}, this.sector.name]" />
+            <resume label="checkcachedtrades" />
+        </do_if>
+        <set_value name="$NavTable" exact="global.$MKFactionData.$GlobalNavGraph.{$CurrentTerritoryData.$TerritoryKey}.$Neighbors" />
+        <set_value name="$TargetTerritoryKey" exact="$CurrentTerritoryData.$TerritoryKey" />
+        <set_value name="$TargetTerritoryEntry" exact="$CurrentTerritoryData.$TerritoryEntry" />
+        <set_value name="$UnexploredList" exact="[]" />
+        <set_value name="$ExploredList" exact="[]" />
+        <set_value name="$ExploredKeys" exact="[]" />
+
+        <label name="FindBuyerLoop" />
+        <do_if value="not $FindBuyerState?">
+            <resume label="find_sell_offers" />
+        </do_if>
+        <do_if value="$FindBuyerState == 'LocateBuyers'">
+
+            <do_if value="not $TargetTerritoryEntry.$Sectors?">
+                <resume label="checkcachedtrades" />
+            </do_if>
+
+            <set_value name="$Sectors" exact="$TargetTerritoryEntry.$Sectors.clone" />
+            <do_if value="not $Sectors? or $Sectors.count == 0">
+                <remove_value name="$CurrentTerritoryData" />
+                <resume label="StartEvalLoop" />
+            </do_if>
+
+            <set_value name="$TerritoryBuyOffers" exact="[]" />
+
+            <do_if value="not $TargetWare? or typeof $TargetWare != datatype.ware">
+                <debug_text text="'Invalid ware %s'.[@$TargetWare]" />
+                <set_value name="$EvaluateStage" exact="'ChangeWare'" />
+                <resume label="DecisionLoop" />
+            </do_if>
+            <do_for_each name="$Sector" in="$Sectors">
+                <find_buy_offer tradepartner="this.ship" wares="$TargetWare" space="$Sector" result="$FoundTerritoryBuyOffers" multiple="true">
+                    <match_buyer tradesknownto="$Faction">
+                        <match_relation_to faction="$Faction" relation="enemy" comparison="not" />
+                    </match_buyer>
+                    <offeramount min="1" tradepartner="this.ship" />
+                </find_buy_offer>
+                <append_list_elements name="$TerritoryBuyOffers" other="$FoundTerritoryBuyOffers" />
+            </do_for_each>
+            <do_if value="$TerritoryBuyOffers.count == 0">
+                <debug_text text="'No buy offers found for %s %s in %s at %s'.[this.ship.name, this.ship.idcode, this.ship.sector.name, $TargetTerritoryKey]" chance="@$DebugDecision" />
+                <set_value name="$FindBuyerState" exact="'IncrementTerritory'" />
+                <resume label="FindBuyerLoop" />
+            </do_if>
+
+            <do_for_each in="$TerritoryBuyOffers" reverse="true">
+                <do_if value="not loop.element.available">
+                    <debug_text text="'Invalid trade %s for %s %s'.[loop.element, this.ship.name, this.ship.idcode]" chance="@$DebugDecision" />
+                    <resume label="checkcachedtrades" />
+                </do_if>
+            </do_for_each>
+            <set_value name="$CheckedWare" exact="true" />
+
+            <sort_trades tradelist="$TerritoryBuyOffers" name="$SortedBuyOffers" sorter="amount" />
+            <do_if value="$SortedBuyOffers? and $SortedBuyOffers.count gt 0">
+                <set_value name="$TotalCount" exact="$SortedBuyOffers.count" />
+                <set_value name="$FindBuyerState" exact="'RankTrade'" />
+            </do_if>
+            <do_else>
+                <set_value name="$FindBuyerState" exact="'IncrementTerritory'" />
+            </do_else>
+            <wait min="50ms" max="2s" />
+            <resume label="FindBuyerLoop" />
+        </do_if>
+        <do_elseif value="$FindBuyerState == 'RankTrade'">
+            <do_if value="not $SortedBuyOffers.count">
+                <debug_text text="'Error! SortedBuyOffers is %s with count %s'.[$SortedBuyOffers, $SortedBuyOffers.count]" />
+                <set_value name="$FindBuyerState" exact="'EvaluateOptions'" />
+                <resume label="FindBuyerLoop" />
+            </do_if>
+            <do_for_each name="$Trade" in="$SortedBuyOffers" reverse="true">
+
+                <do_if value="not $Trade.available">
+                    <set_value name="$TotalCount" operation="subtract" />
+                    <continue />
+                </do_if>
+                <set_value name="$TradeIndex" operation="add" />
+
+
+                <do_if value="$CargoToSell? and this.ship.cargo.{$TargetWare}.free == 0">
+                    <set_value name="$OfferAmount" exact="[$Trade.offeramount, this.ship.cargo.{$TargetWare}.count].min" />
+                    <set_value name="$AmountRank" exact="($OfferAmount)f / (this.ship.cargo.{$TargetWare}.count)f" />
+                </do_if>
+                <do_else>
+                    <set_value name="$OfferAmount" exact="[$Trade.offeramount, this.ship.cargo.{$TargetWare}.free].min" />
+                    <set_value name="$AmountRank" exact="($OfferAmount)f / (this.ship.cargo.{$TargetWare}.free)f" />
+                </do_else>
+
+                <set_value name="$RelativePrice" exact="$Trade.relativeprice" />
+
+
+                <get_global_path component="$Stuff" resultdistance="$DistanceCost">
+                    <start object="this.ship" />
+                    <end object="$Trade.owner" />
+                </get_global_path>
+
+                <set_value name="$DistanceRank" exact="if $DistanceCost != -1 then [1 - log($DistanceCost)/log(5500000), 0].max else 1" />
+                <set_value name="$ArbitrageRank" exact="($RelativePrice) / (2)f + 0.5" />
+                <set_value name="$TotalRank" exact="$AmountRank + $ArbitrageRank + $DistanceRank" />
+
+
+                <do_if value="not $WareRankAvgs.{$TargetWare}?">
+                    <set_value name="$WareRankAvgs.{$TargetWare}" exact="[]" />
+                    <set_value name="$WareRankAvgs.{$TargetWare}" exact="[($AmountRank)f, ($DistanceRank)f, ($ArbitrageRank)f, ($TotalRank)f]" />
+                </do_if>
+                <do_else>
+                    <set_value name="$WareRankAvgs.{$TargetWare}"
+                        exact="[$WareRankAvgs.{$TargetWare}.{1} + ($AmountRank - $WareRankAvgs.{$TargetWare}.{1})f / $TradeIndex, 
+                        $WareRankAvgs.{$TargetWare}.{2} + ($DistanceRank - $WareRankAvgs.{$TargetWare}.{2})f / $TradeIndex, 
+                        $WareRankAvgs.{$TargetWare}.{3} + ($ArbitrageRank - $WareRankAvgs.{$TargetWare}.{3})f / $TradeIndex,
+                        $WareRankAvgs.{$TargetWare}.{4} + ($TotalRank - $WareRankAvgs.{$TargetWare}.{4})f / $TradeIndex]" />
+                </do_else>
+
+                <do_if value="not $BuyRankTable.{$TargetWare}?">
+                    <set_value name="$BuyRankTable.{$TargetWare}" exact="[]" />
+                </do_if>
+
+                <append_to_list name="$BuyRankTable.{$TargetWare}" exact="[$Trade, $AmountRank, $DistanceRank, $ArbitrageRank, $TotalRank]" />
+                <append_to_list name="$Trades" exact="[$Trade, null, $OfferAmount, null, $OfferAmount * $Trade.unitprice, null, null]" />
+                <remove_value name="$SortedBuyOffers.last" />
+            </do_for_each>
+            <set_value name="$FindBuyerState" exact="'IncrementTerritory'" />
+            <resume label="FindBuyerLoop" />
+        </do_elseif>
+        <do_elseif value="$FindBuyerState == 'IncrementTerritory'">
+            <do_if value="not $FactionEntry.$CostGraph.{$TargetTerritoryKey}.$BaseCost?">
+                <resume label="checkcachedtrades" />
+            </do_if>
+            <do_if value="not $TargetWare? or typeof $TargetWare != datatype.ware">
+                <debug_text text="'Invalid ware %s'.[@$TargetWare]" />
+                <set_value name="$EvaluateStage" exact="'ChangeWare'" />
+                <resume label="DecisionLoop" />
+            </do_if>
+            <do_if value="not $ExploredKeys?">
+                <set_value name="$FindBuyerState" exact="'EvaluateOptions'" />
+                <resume label="FindBuyerSetup" />
+            </do_if>
+            <do_if value="not $ExploredKeys.indexof.{$TargetTerritoryKey}">
+                <append_to_list name="$ExploredList" exact="[$TargetTerritoryKey, $NavIndex, false]" />
+                <append_to_list name="$ExploredKeys" exact="$TargetTerritoryKey" />
+            </do_if>
+            <do_if value="$UnexploredList.count == 0">
+                <do_for_each in="$ExploredList">
+                    <do_if value="not loop.element.{3}?">
+                        <debug_text text="'Error in index %s with %s'.[loop.index, loop.element]" />
+                        <set_value name="$ExploredList" exact="[]" />
+                        <set_value name="$FindBuyerState" exact="'EvaluateOptions'" />
+                        <resume label="FindBuyerSetup" />
+                    </do_if>
+                    <do_if value="not global.$MKFactionData.$GlobalNavGraph.{loop.element.{1}}? or not $FactionEntry.$CostGraph.{loop.element.{1}}.$BaseCost?">
+                        <resume label="checkcachedtrades" />
+                    </do_if>
+                    <do_if value="not loop.element.{3}">
+                        <set_value name="$ExploredList.{$ExploredList.indexof.{loop.element}}" exact="[loop.element.{1}, loop.element.{2}, true]" />
+                        <do_for_each name="$Neighbor" in="global.$MKFactionData.$GlobalNavGraph.{loop.element.{1}}.$Neighbors.keys.list">
+                            <debug_text text="'Checking neighbor %s'.[$Neighbor]" chance="@$DebugDecision" />
+                            <do_if value="not $ExploredKeys.indexof.{$Neighbor}">
+                                <debug_text text="'Adding neighbor %s to unexplored list'.[$Neighbor]" chance="@$DebugDecision" />
+                                <append_to_list name="$UnexploredList" exact="$Neighbor" />
+                            </do_if>
+                        </do_for_each>
+                        <debug_text text="'Unexplored list is: %s'.[$UnexploredList]" chance="@$DebugDecision" />
+                        <debug_text text="'Explored list is: %s'.[$ExploredList]" chance="@$DebugDecision" />
+                        <do_if value="$UnexploredList.count != 0">
+                            <set_value name="$AllTer" exact="global.$MKFactionData.$AllTerritories" />
+                            <set_value name="$NavIndex" exact="loop.element.{2} + 1" />
+                        </do_if>
+                    </do_if>
+                </do_for_each>
+                <do_if value="$UnexploredList.count == 0">
+                    <debug_text text="'Buying: No remaining territories to explore for %s %s'.[this.ship.name, this.ship.idcode]" chance="@$DebugDecision" />
+                    <debug_text text="'%s %s'.[$UnexploredList, $ExploredList]" chance="@$DebugDecision" />
+                    <set_value name="$UnexploredList" exact="[]" />
+                    <set_value name="$ExploredList" exact="[]" />
+                    <set_value name="$ExploredKeys" exact="[]" />
+                    <set_value name="$FindBuyerState" exact="'EvaluateOptions'" />
+                    <set_value name="$CheckedWare" exact="true" />
+                    <do_if value="$Trades.count gt 50">
+                        <debug_text text="'Found enough trades!'" />
+                        <set_value name="$EvaluateStage" exact="'FindSeller'" />
+                        <resume label="DecisionLoop" />
+                    </do_if>
+                    <resume label="FindBuyerLoop" />
+                </do_if>
+                <wait min="50ms" max="5s" />
+            </do_if>
+
+            <do_if value="$UnexploredList.count != 0">
+                <set_value name="$TargetTerritoryKey" exact="$UnexploredList.{1}" />
+                <debug_text text="'Selected target territory: %s for %s %s'.[ $TargetTerritoryKey, this.ship.name, this.ship.idcode ]" chance="@$DebugDecision" />
+                <do_if value="not $FactionEntry.$CostGraph.{$TargetTerritoryKey}.$BaseCost? or not global.$MKFactionData.$AllTerritories.{$TargetTerritoryKey}?">
+                    <resume label="checkcachedtrades" />
+                </do_if>
+                <remove_value name="$UnexploredList.{$UnexploredList.indexof.{$TargetTerritoryKey}}" />
+                <sort_list list="$UnexploredList" sortbyvalue="$FactionEntry.$CostGraph.{$TargetTerritoryKey}.$BaseCost" />
+                <do_if value="$ExploredKeys.indexof.{$TargetTerritoryKey}">
+                    <set_value name="$FindBuyerState" exact="'IncrementTerritory'" />
+                    <resume label="FindBuyerLoop" />
+                </do_if>
+                <do_if value="not $FactionEntry.$CostGraph.{$TargetTerritoryKey}.$BaseCost?">
+                    <resume label="checkcachedtrades" />
+                </do_if>
+                <do_if value="$FactionEntry.$CostGraph.{$TargetTerritoryKey}.$BaseCost ge 10">
+                    <set_value name="$FindBuyerState" exact="'IncrementTerritory'" />
+                    <resume label="FindBuyerLoop" />
+                </do_if>
+                <debug_text text="'Proceeding to locate buyers for %s %s in %s with ware %s'.[this.ship.name, this.ship.idcode, $TargetTerritoryKey, $TargetWare]" chance="@$DebugDecision" />
+                <debug_text text="'Trades is %s'.[$Trades.count]" chance="@$DebugDecision" />
+                <do_if value="$Trades.count gt 50">
+                    <debug_text text="'Found enough trades!'" />
+                    <set_value name="$EvaluateStage" exact="'FindSeller'" />
+                    <resume label="DecisionLoop" />
+                </do_if>
+                <set_value name="$TargetTerritoryEntry" exact="global.$MKFactionData.$AllTerritories.{$TargetTerritoryKey}" />
+                <set_value name="$FindBuyerState" exact="'LocateBuyers'" />
+                <resume label="FindBuyerLoop" />
+            </do_if>
+        </do_elseif>
+        <do_elseif value="$FindBuyerState == 'EvaluateOptions'">
+            <wait exact="50ms" />
+            <debug_text text="'Evaluate options for %s %s in %s'.[this.ship.name, this.ship.idcode, this.ship.sector.name]" chance="@$DebugDecision" />
+            <do_if value="not $CheckedWare? or not $CheckedWare">
+                <set_value name="$FindBuyerState" exact="'LocateBuyers'" />
+                <resume label="FindBuyerLoop" />
+            </do_if>
+            <do_if value="$UnexploredList.count == 0 and not $BuyRankTable.{$TargetWare}?">
+                <debug_text text="'%s %s in %s has unex %s ex %s exkeys %s with ware %s'.[this.ship.name, this.ship.idcode, this.ship.sector.name, $UnexploredList.count, $ExploredList.count, $ExploredKeys.count, $TargetWare]" chance="@$DebugDecision" />
+                <debug_text text="'Changing ware'" chance="@$DebugDecision" />
+                <set_value name="$EvaluateStage" exact="'ChangeWare'" />
+                <resume label="DecisionLoop" />
+            </do_if>
+            <do_if value="$SortedBuyOffers.count gt 0">
+                <debug_text text="'Sorted buys is %s'.[$SortedBuyOffers.count]" chance="@$DebugDecision" />
+                <set_value name="$FindBuyerState" exact="'RankTrade'" />
+                <resume label="FindBuyerLoop" />
+            </do_if>
+
+
+            <do_if value="$WareRankAvgs.{$TargetWare}?">
+                <set_value name="$SearchProgress" exact="($BuyRankTable.{$TargetWare}.count)f / ($TotalCount)f" />
+                <set_value name="$WeightedAvgs" exact="($WareRankAvgs.{$TargetWare}.{1} + $WareRankAvgs.{$TargetWare}.{2} + $WareRankAvgs.{$TargetWare}.{3})f / (3)f" />
+                <set_value name="$ChanceOfBetterTrade" exact="((1 - $WeightedAvgs) + $SearchProgress) / 2 * 100" />
+            </do_if>
+
+            <do_if value="$UnexploredList.count == 0 or $Trades.count gt 100">
+                <do_if value="not $Trades.count">
+                    <debug_text text="'No buyers found for ware %s for %s %s'.[$TargetWare, this.ship.name, this.ship.idcode]" chance="@$DebugDecision" />
+                    <set_value name="$EvaluateStage" exact="'ChangeWare'" />
+                    <resume label="DecisionLoop" />
+                </do_if>
+                <do_else>
+                    <do_if value="$CargoToSell?">
+                        <set_value name="$EvaluateStage" exact="'Finished'" />
+                        <resume label="DecisionLoop" />
+                    </do_if>
+                    <do_else>
+                        <remove_value name="$UnexploredList" />
+                        <remove_value name="$ExploredList" />
+                        <remove_value name="$ExploredKeys" />
+                        <set_value name="$EvaluateStage" exact="'FindSeller'" />
+                        <resume label="DecisionLoop" />
+                    </do_else>
+                </do_else>
+            </do_if>
+            <do_else>
+                <do_if value="$Trades.count gt 0">
+                    <do_all chance="100 - $ChanceOfBetterTrade">
+                        <set_value name="$EvaluateStage" exact="'FindSeller'" />
+                        <resume label="DecisionLoop" />
+                    </do_all>
+                </do_if>
+                <set_value name="$FindBuyerState" exact="'IncrementTerritory'" />
+                <resume label="FindBuyerLoop" />
+            </do_else>
+        </do_elseif>
+        <do_else>
+            <debug_text text="'Error! $FindBuyerState is invalid! %s'.[$FindBuyerState]" />
+        </do_else>
+        <resume label="FindBuyerLoop" />
+
+        <label name="FindSellerSetup" />
+        <sort_list list="$Trades" sortbyvalue="loop.element.{5}" sortdescending="true" />
+        <set_value name="$TradeIndex" exact="0" />
+        <set_value name="$NavIndex" exact="1" />
+        <set_value name="$SellOffersCount" exact="0" />
+        <set_value name="$TerritoriesSellOffers" exact="[]" />
+        <set_value name="$SellRankTable" exact="table[]" />
+        <set_value name="$WareRankAvgs" exact="table[]" />
+        <set_value name="$AmountTolerance" exact="0f" />
+        <set_value name="$DistanceTolerance" exact="0f" />
+        <set_value name="$ArbitrageTolerance" exact="0f" />
+        <set_value name="$SellerTolerance" exact="0f" />
+        <set_value name="$CheckedWare" exact="false" />
+
+        <do_if value="not global.$MKFactionData.$GlobalNavGraph.{$CurrentTerritoryData.$TerritoryKey}.$Neighbors?">
+            <debug_text text="'Error setting navtable'" />
+            <debug_text text="'Territory should be %s'.[global.$MKFactionData.$SectorToTerritory.{this.sector}.$TerritoryKey]" />
+            <debug_text text="'Key %s global graph entry %s'.[$CurrentTerritoryData.$TerritoryKey, @global.$MKFactionData.$GlobalNavGraph.{$CurrentTerritoryData.$TerritoryKey}]" />
+            <resume label="checkcachedtrades" />
+        </do_if>
+        <set_value name="$NavTable" exact="global.$MKFactionData.$GlobalNavGraph.{$CurrentTerritoryData.$TerritoryKey}.$Neighbors" />
+        <set_value name="$TargetTerritoryKey" exact="$CurrentTerritoryData.$TerritoryKey" />
+        <set_value name="$TargetTerritoryEntry" exact="$CurrentTerritoryData.$TerritoryEntry" />
+        <set_value name="$UnexploredList" exact="[]" />
+        <set_value name="$ExploredList" exact="[]" />
+        <set_value name="$ExploredKeys" exact="[]" />
+
+
+        <label name="FindSellerLoop" />
+        <do_if value="not $FindSellerState?">
+            <resume label="find_sell_offers" />
+        </do_if>
+        <do_if value="$FindSellerState == 'LocateSellers'">
+            <do_if value="not $TargetTerritoryEntry.$Sectors?">
+                <resume label="checkcachedtrades" />
+            </do_if>
+
+
+            <set_value name="$Sectors" exact="$TargetTerritoryEntry.$Sectors.clone" />
+            <do_if value="not $Sectors? or $Sectors.count == 0">
+                <remove_value name="$CurrentTerritoryData" />
+                <resume label="StartEvalLoop" />
+            </do_if>
+            <do_if value="not $TargetWare? or typeof $TargetWare != datatype.ware">
+                <debug_text text="'Invalid ware %s'.[@$TargetWare]" />
+                <set_value name="$EvaluateStage" exact="'ChangeWare'" />
+                <resume label="DecisionLoop" />
+            </do_if>
+            <do_for_each name="$Sector" in="$Sectors">
+                <find_sell_offer tradepartner="this.ship" wares="$TargetWare" space="$Sector" result="$FoundTerritoriesSellOffers" multiple="true">
+                    <offeramount min="1" tradepartner="this.ship" />
+                    <match_seller tradesknownto="this.owner" owner="$selltofactions" negateownerfilter="not $selltofactions.count">
+                        <match_seller tradesknownto="$Faction">
+                            <match_relation_to faction="$Faction" relation="enemy" comparison="not" />
+                        </match_seller>
+                        <offeramount min="1" tradepartner="this.ship" />
+                        <match_use_blacklist group="$blacklistgroup" type="blacklisttype.objectactivity" object="this.ship" />
+                    </match_seller>
+                </find_sell_offer>
+                <append_list_elements name="$TerritoriesSellOffers" other="$FoundTerritoriesSellOffers" />
+            </do_for_each>
+            <do_if value="not $TerritoriesSellOffers?">
+                <resume label="checkcachedtrades" />
+            </do_if>
+            <do_if value="$TerritoriesSellOffers.count == 0">
+                <set_value name="$FindSellerState" exact="'IncrementTerritory'" />
+                <resume label="FindSellerLoop" />
+            </do_if>
+
+            <set_value name="$CheckedWare" exact="true" />
+            <sort_trades tradelist="$TerritoriesSellOffers" name="$SortedSellOffers" sorter="amount" />
+
+            <do_if value="$SortedSellOffers? and $SortedSellOffers.count gt 0">
+                <set_value name="$TotalCount" exact="$SortedSellOffers.count" />
+                <set_value name="$FindSellerState" exact="'RankTrade'" />
+            </do_if>
+            <do_else>
+                <set_value name="$FindSellerState" exact="'IncrementTerritory'" />
+            </do_else>
+            <wait min="50ms" max="2s" />
+            <resume label="FindSellerLoop" />
+        </do_if>
+        <do_elseif value="$FindSellerState == 'RankTrade'">
+            <do_if value="not $SortedSellOffers.count">
+                <debug_text text="'Error! SortedSellOffers is %s with count %s'.[$SortedSellOffers, $SortedSellOffers.count]" />
+                <set_value name="$FindSellerState" exact="'EvaluateOptions'" />
+                <resume label="FindSellerLoop" />
+            </do_if>
+            <do_for_each name="$Trade" in="$SortedSellOffers" reverse="true">
+                <do_if value="not $Trade.available or $Trade.offeramount == 0">
+                    <set_value name="$TotalCount" operation="subtract" />
+                    <continue />
+                </do_if>
+
+                <do_if value="this.ship.cargo.{$TargetWare}.free == 0">
+                    <debug_text text="'Ware is %s'.[$TargetWare]" chance="@$DebugDecision" />
+                    <do_for_each name="$Ware" in="this.ship.cargo.list">
+                        <debug_text text="'Current cargo hold has: %s with amount %s'.[$Ware, this.ship.cargo.{$Ware}.count]" chance="@$DebugDecision" />
+                    </do_for_each>
+                    <debug_text text="'Can hold %s, trade selling amount %s'.[this.ship.cargo.{$TargetWare}.free, $Trade.offeramount]" chance="@$DebugDecision" />
+                    <set_value name="$EvaluateStage" exact="'Finished'" />
+                    <resume label="DecisionLoop" />
+                </do_if>
+
+                <set_value name="$OfferAmount" exact="[$Trade.offeramount, this.ship.cargo.{$TargetWare}.free].min" />
+                <set_value name="$TradeIndex" operation="add" />
+
+                <set_value name="$AmountRank" exact="($OfferAmount)f / (this.ship.cargo.{$TargetWare}.free)f" />
+
+                <set_value name="$RelativePrice" exact="$Trade.relativeprice" />
+
+                <get_global_path component="$Stuff" resultdistance="$DistanceCost">
+                    <start object="this.ship" />
+                    <end object="$Trade.owner" />
+                </get_global_path>
+
+                <set_value name="$DistanceRank" exact="if $DistanceCost != -1 then [1 - log($DistanceCost)/log(5500000), 0].max else 1" />
+                <set_value name="$ArbitrageRank" exact="($RelativePrice)f / (2)f - 0.5" />
+                <set_value name="$TotalRank" exact="$AmountRank + $ArbitrageRank + $DistanceRank" />
+
+                <do_if value="not $WareRankAvgs.{$TargetWare}?">
+                    <set_value name="$WareRankAvgs.{$TargetWare}" exact="[]" />
+                    <set_value name="$WareRankAvgs.{$TargetWare}" exact="[($AmountRank)f, ($DistanceRank)f, ($ArbitrageRank)f, ($TotalRank)f]" />
+                </do_if>
+                <do_else>
+                    <set_value name="$WareRankAvgs.{$TargetWare}"
+                        exact="[$WareRankAvgs.{$TargetWare}.{1} + ($AmountRank - $WareRankAvgs.{$TargetWare}.{1})f / $TradeIndex, 
+                        $WareRankAvgs.{$TargetWare}.{2} + ($DistanceRank - $WareRankAvgs.{$TargetWare}.{2})f / $TradeIndex, 
+                        $WareRankAvgs.{$TargetWare}.{3} + ($ArbitrageRank - $WareRankAvgs.{$TargetWare}.{3})f / $TradeIndex,
+                        $WareRankAvgs.{$TargetWare}.{4} + ($TotalRank - $WareRankAvgs.{$TargetWare}.{4})f / $TradeIndex]" />
+                </do_else>
+
+                <do_if value="not $SellRankTable.{$TargetWare}?">
+                    <set_value name="$SellRankTable.{$TargetWare}" exact="[]" />
+                </do_if>
+
+                <append_to_list name="$SellRankTable.{$TargetWare}" exact="[$Trade, $AmountRank, $DistanceRank, $ArbitrageRank, $TotalRank]" />
+
+                <do_for_each in="$Trades">
+                    <do_if value="not loop.element.{1}.available">
+                        <remove_value name="$Trades.{loop.index}" />
+                    </do_if>
+                    <do_elseif value="loop.element.{1}.unitprice gt $Trade.unitprice">
+                        <set_value name="$OfferPrice" exact="$OfferAmount * $Trade.unitprice" />
+                        <do_if value="loop.element.{6} == null or $OfferPrice lt loop.element.{6}">
+                            <set_value name="$Trades.{$Trades.indexof.{loop.element}}" exact="[loop.element.{1}, $Trade, loop.element.{3}, $OfferAmount, loop.element.{5}, $OfferPrice, loop.element.{5} - $OfferPrice]" />
+                        </do_if>
+                    </do_elseif>
+                </do_for_each>
+
+                <sort_list list="$Trades" sortbyvalue="loop.element.{7}" />
+                <remove_value name="$SortedSellOffers.last" />
+            </do_for_each>
+
+            <set_value name="$FindSellerState" exact="'IncrementTerritory'" />
+
+            <resume label="FindSellerLoop" />
+        </do_elseif>
+        <do_elseif value="$FindSellerState == 'IncrementTerritory'">
+            <do_if value="not $TargetWare? or typeof $TargetWare != datatype.ware">
+                <debug_text text="'Invalid ware %s'.[@$TargetWare]" />
+                <set_value name="$EvaluateStage" exact="'ChangeWare'" />
+                <resume label="DecisionLoop" />
+            </do_if>
+            <do_if value="not $FactionEntry.$CostGraph.{$TargetTerritoryKey}.$BaseCost?">
+                <resume label="checkcachedtrades" />
+            </do_if>
+            <do_if value="not $ExploredKeys?">
+                <set_value name="$FindSellerState" exact="'EvaluateOptions'" />
+                <resume label="FindSellerSetup" />
+            </do_if>
+            <do_if value="not $ExploredKeys.indexof.{$TargetTerritoryKey}">
+                <append_to_list name="$ExploredList" exact="[$TargetTerritoryKey, $NavIndex, false]" />
+                <append_to_list name="$ExploredKeys" exact="$TargetTerritoryKey" />
+            </do_if>
+
+            <do_if value="$UnexploredList.count == 0">
+                <do_for_each in="$ExploredList">
+                    <do_if value="not loop.element.{3}?">
+                        <debug_text text="'Error in index %s with %s'.[loop.index, loop.element]" />
+                        <set_value name="$ExploredList" exact="[]" />
+                        <set_value name="$FindSellerState" exact="'EvaluateOptions'" />
+                        <resume label="FindSellerSetup" />
+                    </do_if>
+                    <do_if value="not global.$MKFactionData.$GlobalNavGraph.{loop.element.{1}}? or not $FactionEntry.$CostGraph.{loop.element.{1}}.$BaseCost?">
+                        <resume label="checkcachedtrades" />
+                    </do_if>
+                    <do_if value="not loop.element.{3}">
+                        <set_value name="$ExploredList.{loop.index}" exact="[loop.element.{1}, loop.element.{2}, true]" />
+                        <do_if value="not global.$MKFactionData.$GlobalNavGraph.{loop.element.{1}}?">
+                            <resume label="checkcachedtrades" />
+                        </do_if>
+                        <do_for_each name="$Neighbor" in="global.$MKFactionData.$GlobalNavGraph.{loop.element.{1}}.$Neighbors.keys.list">
+                            <do_if value="not $ExploredKeys.indexof.{$Neighbor}">
+                                <debug_text text="'Sell: Adding neighbor %s to unexplored list'.[$Neighbor]" chance="@$DebugDecision" />
+                                <append_to_list name="$UnexploredList" exact="$Neighbor" />
+                            </do_if>
+                        </do_for_each>
+                        <debug_text text="'Unexplored list is: %s'.[$UnexploredList]" chance="@$DebugDecision" />
+                        <do_if value="$UnexploredList.count != 0">
+                            <set_value name="$NavIndex" exact="loop.element.{2} + 1" />
+                            <break />
+                        </do_if>
+                    </do_if>
+                </do_for_each>
+                <wait min="50ms" max="5s" />
+            </do_if>
+
+            <do_if value="$UnexploredList.count != 0">
+                <set_value name="$TargetTerritoryKey" exact="$UnexploredList.{1}" />
+                <do_if value="not $FactionEntry.$CostGraph.{$TargetTerritoryKey}.$BaseCost? or not global.$MKFactionData.$AllTerritories.{$TargetTerritoryKey}?">
+                    <resume label="checkcachedtrades" />
+                </do_if>
+                <remove_value name="$UnexploredList.{$UnexploredList.indexof.{$TargetTerritoryKey}}" />
+                <sort_list list="$UnexploredList" sortbyvalue="$FactionEntry.$CostGraph.{$TargetTerritoryKey}.$BaseCost" />
+                <do_if value="$ExploredKeys.indexof.{$TargetTerritoryKey}">
+                    <set_value name="$FindSellerState" exact="'IncrementTerritory'" />
+                    <resume label="FindSellerLoop" />
+                </do_if>
+                <do_if value="$FactionEntry.$CostGraph.{$TargetTerritoryKey}.$BaseCost ge 10">
+                    <append_to_list name="$ExploredList" exact="[$TargetTerritoryKey, $NavIndex, true]" />
+                    <set_value name="$FindSellerState" exact="'IncrementTerritory'" />
+                    <resume label="FindSellerLoop" />
+                </do_if>
+                <set_value name="$TargetTerritoryEntry" exact="global.$MKFactionData.$AllTerritories.{$TargetTerritoryKey}" />
+                <set_value name="$FindSellerState" exact="'LocateSellers'" />
+                <resume label="FindSellerLoop" />
+            </do_if>
+            <do_else>
+                <set_value name="$UnexploredList" exact="[]" />
+                <set_value name="$ExploredList" exact="[]" />
+                <set_value name="$ExploredKeys" exact="[]" />
+                <set_value name="$FindSellerState" exact="'EvaluateOptions'" />
+                <set_value name="$CheckedWare" exact="true" />
+                <resume label="FindSellerLoop" />
+            </do_else>
+        </do_elseif>
+        <do_elseif value="$FindSellerState == 'EvaluateOptions'">
+            <wait exact="50ms" />
+            <do_if value="not $CheckedWare? or not $CheckedWare">
+                <set_value name="$FindSellerState" exact="'LocateSellers'" />
+                <resume label="FindSellerLoop" />
+            </do_if>
+
+            <do_if value="$UnexploredList.count == 0 and not $SellRankTable.{$TargetWare}?">
+                <debug_text text="'%s %s in %s has unex %s ex %s exkeys %s with ware %s'.[this.ship.name, this.ship.idcode, this.ship.sector.name, $UnexploredList.count, $ExploredList.count, $ExploredKeys.count, $TargetWare]" chance="@$DebugDecision" />
+                <debug_text text="'Changing ware'" chance="@$DebugDecision" />
+                <set_value name="$EvaluateStage" exact="'ChangeWare'" />
+                <resume label="DecisionLoop" />
+            </do_if>
+            <do_if value="$SortedSellOffers? and $SortedSellOffers.count gt 0">
+                <debug_text text="'Sorted sells is %s for ware %s'.[$SortedSellOffers.count, $TargetWare]" chance="@$DebugDecision" />
+                <set_value name="$FindSellerState" exact="'RankTrade'" />
+                <resume label="FindSellerLoop" />
+            </do_if>
+
+            <do_if value="$WareRankAvgs.{$TargetWare}?">
+                <set_value name="$SearchProgress" exact="($SellRankTable.{$TargetWare}.count)f / ($TotalCount)f" />
+                <set_value name="$WeightedAvgs" exact="($WareRankAvgs.{$TargetWare}.{1} + $WareRankAvgs.{$TargetWare}.{2} + $WareRankAvgs.{$TargetWare}.{3})f / (3)f" />
+                <set_value name="$ChanceOfBetterTrade" exact="((1 - $WeightedAvgs) + $SearchProgress) / 2 * 100" />
+            </do_if>
+
+
+            <do_if value="$UnexploredList.count == 0 or $SellRankTable.{$TargetWare}.count gt 50">
+                <do_if value="$Trades.last.{2}.available">
+                    <set_value name="$EvaluateStage" exact="'Finished'" />
+                    <resume label="DecisionLoop" />
+                </do_if>
+                <do_else>
+                    <debug_text text="'No available trades, changing ware.'" chance="@$DebugDecision" />
+                    <debug_text text="$Trades" chance="@$DebugDecision" />
+                    <set_value name="$EvaluateStage" exact="'ChangeWare'" />
+                    <resume label="DecisionLoop" />
+                </do_else>
+            </do_if>
+            <do_else>
+                <do_if value="$Trades.last.{2}.available">
+                    <do_all chance="100 - $ChanceOfBetterTrade">
+                        <set_value name="$EvaluateStage" exact="'Finished'" />
+                        <resume label="DecisionLoop" />
+                    </do_all>
+                </do_if>
+                <set_value name="$FindSellerState" exact="'IncrementTerritory'" />
+                <resume label="FindSellerLoop" />
+            </do_else>
+        </do_elseif>
+        <do_else>
+            <debug_text text="'Error! $FindSellerState is invalid! %s'.[$FindSellerState]" />
+        </do_else> 
+        <resume label="FindSellerLoop" /> -->
+    </add>
+</diff>

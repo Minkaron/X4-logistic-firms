@@ -1,0 +1,30 @@
+<?xml version='1.0' encoding='utf-8'?>
+<diff>
+    <remove sel="/aiscript/attention[@min='unknown']/actions/do_if[@value='$performbuy']" />
+    <replace sel="/aiscript/attention[@min='unknown']/actions/do_if[@value='$performsell']">
+        <do_if value="$performbuy">
+            <run_script name="'move.hoplist'">
+                <param name="StartingTerritory" value="global.$MKFactionData.$SectorToTerritory.{this.sector}" />
+                <param name="destination" value="$selloffer.owner" />
+                <save_retval name="endpoint" variable="$endpoint" />
+                <save_retval name="endpos" variable="$endpos" />
+            </run_script>
+            <create_trade_order name="$buyorder" object="this.object" tradeoffer="$selloffer" amount="$buyamount" internal="not $blacklist_overridebuy?" />
+        </do_if>
+        <do_if value="$performsell">
+            <do_if value="$buyorder.trade.owner?">
+                <run_script name="'move.hoplist'">
+                    <param name="StartingTerritory" value="global.$MKFactionData.$SectorToTerritory.{$endpoint.sector}" />
+                    <param name="destination" value="$buyoffer.owner" />
+                </run_script>
+            </do_if>
+            <do_else>
+                <run_script name="'move.hoplist'">
+                    <param name="StartingTerritory" value="global.$MKFactionData.$SectorToTerritory.{this.sector}" />
+                    <param name="destination" value="$buyoffer.owner" />
+                </run_script>
+            </do_else>
+            <create_trade_order name="$sellorder" object="this.object" tradeoffer="$buyoffer" amount="$sellamount" internal="not $blacklist_overridesell?" />
+        </do_if>
+    </replace>
+</diff>

@@ -1,0 +1,108 @@
+<aiscript name="move.hoplist" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../aiscripts/aiscripts.xsd" version="22">
+    <order id="MoveHopList" name="FindSafePath" allowinloop="false">
+        <params>
+            <param name="StartingTerritory" default="global.$MKFactionData.$SectorToTerritory.{this.sector}" type="internal" />
+            <param name="destination" type="object" />
+        </params>
+        <icon name="order_waitforsignal" condition="this.ship.commander" />
+    </order>
+    <attention min="unknown">
+        <actions>
+            <set_command command="command.wait" />
+            <set_command_action commandaction="commandaction.standingby" />
+
+            <set_value name="$Faction" exact="this.trueowner" />
+            <set_value name="$FactionEntry" exact="global.$MKFactionData.$Factions.{$Faction}" />
+            <set_value name="$StartKey" exact="$StartingTerritory.$TerritoryKey" />
+            <set_value name="$DestKey" exact="global.$MKFactionData.$SectorToTerritory.{$destination.sector}.$TerritoryKey" />
+            <set_value name="$PriorityQueue" exact="table[]" />
+            <set_value name="$Previous" exact="table[]" />
+            <set_value name="$Cost" exact="table[]" />
+            <set_value name="$Different" exact="0" />
+
+            <set_value name="$PriorityQueue.{$StartKey}" exact="0" />
+            <set_value name="$Previous.{$StartKey}" exact="null" />
+            <set_value name="$Cost.{$StartKey}" exact="0" />
+
+
+            <set_value name="$FinalRoute" exact="[]" />
+
+            <do_if value="this.ship.name == 'Dart'">
+                <debug_text text="'Running for %s %s in %s'.[this.ship.name, this.ship.idcode, this.sector.name]" />
+                <set_value name="$DebugDecision" exact="100" />
+            </do_if>
+
+            <do_while value="$PriorityQueue.keys.count">
+                <debug_text text="'Going through Queue for %s'.[this.ship.name]" chance="@$DebugDecision" />
+                <set_value name="$CurKey" exact="$PriorityQueue.keys.sorted.{1}" />
+                <do_if value="$CurKey == $DestKey">
+                    <set_value name="$Previous.$End" exact="$CurKey" />
+                    <break />
+                </do_if>
+                <set_value name="$Neighbors" exact="global.$MKFactionData.$GlobalNavGraph.{$CurKey}.$Neighbors" />
+                <do_for_each name="$NeighborKey" in="$Neighbors">
+                    <set_value name="$NeighborEntry" exact="loop.value.$TerritoryEntry" />
+                    <set_value name="$NeighborCost" exact="$FactionEntry.$CostGraph.{$NeighborKey}.$BaseCost + $Cost.{$CurKey}" />
+                    <do_if value="not $Cost.{$NeighborKey}? or $NeighborCost lt $Cost.{$NeighborKey}">
+                        <set_value name="$Cost.{$NeighborKey}" exact="$NeighborCost" />
+                        <set_value name="$Priority" exact="$NeighborCost" />
+                        <set_value name="$PriorityQueue.{$NeighborKey}" exact="$Priority" />
+                        <set_value name="$Previous.{$NeighborKey}" exact="$CurKey" />
+                        <wait min="50ms" max="500ms" />
+                    </do_if>
+                </do_for_each>
+                <remove_value name="$PriorityQueue.{$CurKey}" />
+            </do_while>
+            <debug_text text="'%s has %s in PriorityQueue'.[this.ship.name, $PriorityQueue.keys.count]" chance="@$DebugDecision" />
+            <debug_text text="'$Previous.$End is %s'.[$Previous.$End]" chance="@$DebugDecision" />
+            <do_if value="$Previous.$End?">
+                <set_value name="$Iterator" exact="$Previous.$End" />
+                <do_while value="$Iterator != null">
+                    <append_to_list name="$FinalRoute" exact="[$Previous.{$Iterator}, $Iterator]" />
+                    <debug_text text="'$Previous is %s and current is %s'.[$Previous.{$Iterator}, $Iterator]" chance="@$DebugDecision" />
+                    <set_value name="$Iterator" exact="$Previous.{$Iterator}" />
+                    <do_if value="$Iterator == null">
+                        <break />
+                    </do_if>
+                    <wait min="50ms" max="500ms" />
+                </do_while>
+                <do_for_each in="$FinalRoute" counter="$Index" reverse="true">
+                    <wait min="50ms" max="500ms" />
+                    <do_if value="not global.$MKFactionData.$GlobalNavGraph.{loop.element.{1}}?">
+                        <continue />
+                    </do_if>
+                    <debug_text text="'Current move order is %s to %s'.[loop.element.{1}, loop.element.{2}]" chance="@$DebugDecision" />
+                    <set_value name="$TransitEntry" exact="global.$MKFactionData.$GlobalNavGraph.{loop.element.{1}}.$Neighbors.{loop.element.{2}}" />
+                    <set_value name="$EntranceGate" exact="$TransitEntry.$EntranceGate" />
+                    <set_value name="$ExitGate" exact="$TransitEntry.$ExitGate" />
+                    <debug_text text="'Creating order for %s in sector %s pos %s'.[this.ship.name, $ExitGate.sector.name, $ExitGate.position]" chance="@$DebugDecision" />
+                    <create_order object="this.assignedcontrolled" id="'MoveWait'">
+                        <param name="destination" value="[$ExitGate.sector, $ExitGate.position]" />
+                        <param name="timeout" value="1s" />
+                    </create_order>
+                </do_for_each>
+                <create_order object="this.assignedcontrolled" id="'MoveWait'">
+                    <param name="destination" value="[$destination, $destination.position]" />
+                    <param name="timeout" value="1s" />
+                </create_order>
+                <do_for_each name="$Order" in="this.assignedcontrolled.orders" chance="@$DebugDecision">
+                    <debug_text text="$Order.name" />
+                    <debug_text text="$Order.state" />
+                </do_for_each>
+                <set_command command="command.move" />
+                <set_command_action commandaction="commandaction.flyingto" param="$destination" />
+                <do_if value="this.assignedcontrolled.order == 'FindSafePath'">
+                    <set_order_state order="this.assignedcontrolled.order" state="orderstate.finish" />
+                </do_if>
+                <return>
+                    <retval name="endpoint" value="$destination" />
+                    <retval name="endpos" value="$destination.position" />
+                </return>
+            </do_if>
+            <do_else>
+                <debug_text text="'Uh oh why is this happening? End is %s'.[$Previous.$End]" />
+                <debug_text text="'%s %s in sector %s has hop error'.[this.ship.name, this.ship.idcode, this.sector.name]" />
+            </do_else>
+        </actions>
+    </attention>
+</aiscript>
