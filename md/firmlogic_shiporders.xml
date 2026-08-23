@@ -1,0 +1,1337 @@
+<mdscript name="FirmLogic_ShipOrders" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../libraries/md.xsd">
+    <cues>
+        <cue name="ShipCargoFillSetup" instantiate="true" namespace="this">
+            <conditions>
+                <event_cue_signalled />
+            </conditions>
+            <actions>
+                <set_value name="$ParentCue" exact="event.param.{6}" />
+                <set_value name="$Ship" exact="event.param.{1}" />
+                <do_for_each name="$Cue" in="$ParentCue.$CargoCues">
+                    <do_if value="$Cue.$Ship == $Ship">
+                        <debug_text text="'Already a cue for this ship %s %s in CargoCues!'" chance="@$DebugDecision" />
+                        <cancel_cue cue="this" />
+                    </do_if>
+                </do_for_each>
+                <do_if value="$Ship.isoperational">
+                    <do_if value="$Ship.tradeorders.count">
+                        <debug_text text="'Already trades in progress for %s %s in %s!'.[$Ship.name, $Ship.idcode, $Ship.sector.name]" chance="@$DebugDecision" />
+                        <cancel_cue cue="this" />
+                    </do_if>
+                    <debug_text text="'Called for %s %s in %s'.[$Ship.name, $Ship.idcode, $Ship.sector.name]" chance="@$DebugDecision" />
+                    <set_value name="$Faction" exact="$Ship.trueowner" />
+                    <set_value name="$FactionEntry" exact="global.$MKFactionData.$Factions.{$Ship.trueowner}" />
+                    <set_value name="$OrderQueue" exact="event.param.{2}" />
+                    <debug_text text="'Queue count is %s with ware %s'.[$OrderQueue.count, $OrderQueue.{1}.{2}.ware.name]" chance="@$DebugDecision" />
+                    <set_value name="$SearchResults" exact="event.param.{3}" />
+                    <set_value name="$TradeTable" exact="event.param.{4}" />
+                    <set_value name="$FormattedTable" exact="event.param.{5}" />
+                    <append_to_list name="$ParentCue.$CargoCues" exact="this" />
+                    <set_value name="$FinalPath" exact="[]" />
+                    <set_value name="$ExploredOrders" exact="[]" />
+                    <set_value name="$HasTrade" exact="false" />
+                    <set_value name="$RemainingCargoSpace" exact="$Ship.cargo.free.all" />
+                    <set_value name="$StartTime" exact="player.age" />
+                    <set_value name="$CandidateTrades" exact="[]" />
+                    <set_value name="$WorkingOrders" exact="[]" />
+                    <cancel_all_orders object="$Ship" />
+                    <create_order object="$Ship" id="'Wait'" name="$DummyOrder">
+                        <param name="timeout" value="15min" />
+                        <param name="fidget" value="true" />
+                    </create_order>
+                </do_if>
+                <do_else>
+                    <cancel_cue cue="this" />
+                </do_else>
+            </actions>
+            <cues>
+                <cue name="StartCargoFillProcess">
+                    <delay exact="50ms" />
+                    <actions>
+                        <debug_text text="'Starting Cargo Fill process'" chance="@$DebugDecision" />
+                        <signal_cue_instantly cue="CargoFillProcess" />
+                    </actions>
+                </cue>
+                <cue name="CargoFillProcess">
+                    <conditions>
+                        <event_cue_signalled />
+                    </conditions>
+                    <delay exact="1s" />
+                    <actions>
+                        <reset_cue cue="this" />
+                        <set_value name="$DebugDecision" exact="0" />
+                        <debug_text text="'In CargoFillProcess'" chance="@$DebugDecision" />
+                        <do_if value="$Ship.isoperational">
+                            <do_if value="player.age - $StartTime le 30min">
+                                <do_if value="not $HasTrade">
+                                    <do_if value="$OrderQueue.count and not @$NoQueuedOrders">
+                                        <debug_text text="'Finding first trade'" chance="@$DebugDecision" />
+                                        <signal_cue_instantly cue="FindFirstTrade" />
+                                    </do_if>
+                                    <do_else>
+                                        <debug_text text="'No orders left in queue for %s!'.[namespace.$ParentCue.$FirmName]" chance="@$DebugDecision" />
+                                        <cancel_order order="$DummyOrder" />
+                                        <cancel_cue cue="namespace" />
+                                        <do_if value="not namespace.$ParentCue.$EconInProgress and player.age - namespace.$ParentCue.$EconAnalysis gt 30min">
+                                            <signal_cue_instantly cue="$ParentCue.$EconAnalysisCue" />
+                                        </do_if>
+                                    </do_else>
+                                </do_if>
+                                <do_elseif value="not $FirstPath?">
+                                    <set_value name="$FirstPath" exact="[]" />
+                                    <do_if value="$Ship.sector == $Station.sector">
+                                        <append_to_list name="$FirstPath" exact="$Ship.sector" />
+                                        <signal_cue_instantly cue="SkipAStar" />
+                                    </do_if>
+                                    <do_else>
+                                        <debug_text text="'Making first path'" chance="@$DebugDecision" />
+                                        <signal_cue_instantly cue="AStarHighPath" param="[$Ship.sector, $Station.sector, $FirstPath, $Faction, $FactionEntry]" />
+                                    </do_else>
+                                </do_elseif>
+                                <do_elseif value="not $SecondPath?">
+                                    <set_value name="$SecondPath" exact="[]" />
+                                    <do_if value="$Station.sector == $OppositeStation.sector">
+                                        <append_to_list name="$SecondPath" exact="$Ship.sector" />
+                                        <signal_cue_instantly cue="SkipAStar" />
+                                    </do_if>
+                                    <do_else>
+                                        <debug_text text="'Making second path'" chance="@$DebugDecision" />
+                                        <signal_cue_instantly cue="AStarHighPath" param="[$Station.sector, $OppositeStation.sector, $SecondPath, $Faction, $FactionEntry]" />
+                                    </do_else>
+                                </do_elseif>
+                                <do_elseif value="@$FirstPath.count and @$SecondPath.count and not $FinalPath.count">
+                                    <debug_text text="'Finalizing path'" chance="@$DebugDecision" />
+                                    <do_for_each in="$FirstPath" reverse="true">
+                                        <append_to_list name="$FinalPath" exact="loop.element" />
+                                    </do_for_each>
+                                    <do_for_each in="$SecondPath" reverse="true">
+                                        <do_if value="$FinalPath.last != loop.element">
+                                            <append_to_list name="$FinalPath" exact="loop.element" />
+                                        </do_if>
+                                    </do_for_each>
+                                    <signal_cue cue="this" />
+                                </do_elseif>
+                                <do_elseif value="$OrderQueue.count and not @$NoTrades">
+                                    <debug_text text="'Remaining cargo space is %s'.[$RemainingCargoSpace]" chance="@$DebugDecision" />
+                                    <signal_cue_instantly cue="CargoFillLoop" />
+                                </do_elseif>
+                                <do_else>
+                                    <signal_cue_instantly cue="BuildShipRoute" />
+                                </do_else>
+                            </do_if>
+                            <do_else>
+                                <debug_text text="'Max time limit reached! %s %s %s'.[$Ship.name, $Ship.idcode, $Ship.sector.name]" />
+                                <debug_text text="'OrderQueue %s %s %s'.[$OrderQueue.count, @$HasTrade, $ExploredOrders.count]" />
+                                <do_for_each name="$Order" in="$OrderQueue">
+                                    <debug_text text="$Order" />
+                                    <debug_text text="$Order.{2}.ware.name" />
+                                    <debug_text text="$SearchResults.$Suppliers.{$Order.{2}.ware}" />
+                                </do_for_each>
+                                <cancel_all_orders object="$Ship" />
+                                <remove_from_list name="namespace.$ParentCue.$CargoCues" exact="namespace" />
+                                <cancel_cue cue="namespace" />
+                            </do_else>
+                        </do_if>
+                        <do_else>
+                            <remove_from_list name="namespace.$ParentCue.$CargoCues" exact="namespace" />
+                            <cancel_cue cue="namespace" />
+                        </do_else>
+                    </actions>
+                </cue>
+                <cue name="FindFirstTrade">
+                    <conditions>
+                        <event_cue_signalled />
+                    </conditions>
+                    <delay exact="1s" />
+                    <actions>
+                        <reset_cue cue="this" />
+                        <debug_text text="'%s %s in %s for First'.[$Ship.name, $Ship.idcode, $Ship.sector.name]" chance="@$DebugDecision" />
+                        <do_if value="not $OrderQueue.count">
+                            <set_value name="$NoQueuedOrders" exact="true" />
+                        </do_if>
+
+                        <do_if value="not $NoQueuedOrders?">
+                            <do_for_each name="$OrderEntry" in="$OrderQueue">
+                                <do_if value="not $ExploredOrders.indexof.{$OrderEntry}">
+                                    <append_to_list name="$ExploredOrders" exact="$OrderEntry" />
+                                    <do_if value="$OrderEntry.{2}.exists and $OrderEntry.{2}.available">
+                                        <do_if value="[$Ship.cargo.{$OrderEntry.{2}.ware}.free, $OrderEntry.{2}.amount].min">
+                                            <set_value name="$Station" exact="$OrderEntry.{1}" />
+                                            <set_value name="$StartTrade" exact="$OrderEntry.{2}" />
+                                            <set_value name="$Product" exact="$OrderEntry.{6}" />
+                                            <set_value name="$Ware" exact="$StartTrade.ware" />
+                                            <set_value name="$NeededAmount" exact="$StartTrade.amount" />
+                                            <set_value name="$PrioritySum" exact="$OrderEntry.{4}" />
+                                            <set_value name="$Issue" exact="$OrderEntry.{5}" />
+                                            <remove_from_list name="$OrderQueue" exact="$OrderEntry" />
+                                            <do_if value="$Issue == 'Overflow'">
+                                                <do_if value="not @$SearchResults.$Demanders.{$Ware}.count">
+                                                    <append_to_list name="namespace.$ParentCue.$PriorityProdOverQueue" exact="[$Station, $Product, $Ware, $NeededAmount, $PrioritySum, $Issue]" />
+                                                    <continue />
+                                                </do_if>
+                                            </do_if>
+                                            <do_elseif value="$Issue == 'Surplus'">
+                                                <do_if value="not @$SearchResults.$Demanders.{$Ware}.count">
+                                                    <append_to_list name="namespace.$ParentCue.$PriorityProdSurQueue" exact="[$Station, $Product, $Ware, $NeededAmount, $PrioritySum, $Issue]" />
+                                                    <continue />
+                                                </do_if>
+                                            </do_elseif>
+                                            <do_elseif value="$Issue == 'Build'">
+                                                <do_if value="not @$SearchResults.$Suppliers.{$Ware}.count">
+                                                    <append_to_list name="namespace.$ParentCue.$PriorityBuildQueue" exact="[$Station, $Product, $Ware, $NeededAmount, $PrioritySum, $Issue]" />
+                                                    <continue />
+                                                </do_if>
+                                            </do_elseif>
+                                            <do_elseif value="$Issue == 'Critical'">
+                                                <do_if value="not @$SearchResults.$Suppliers.{$Ware}.count">
+                                                    <append_to_list name="namespace.$ParentCue.$PriorityProdCritQueue" exact="[$Station, $Product, $Ware, $NeededAmount, $PrioritySum, $Issue]" />
+                                                    <continue />
+                                                </do_if>
+                                            </do_elseif>
+                                            <do_elseif value="$Issue == 'Low'">
+                                                <do_if value="not @$SearchResults.$Suppliers.{$Ware}.count">
+                                                    <append_to_list name="namespace.$ParentCue.$PriorityProdLowQueue" exact="[$Station, $Product, $Ware, $NeededAmount, $PrioritySum, $Issue]" />
+                                                    <continue />
+                                                </do_if>
+                                            </do_elseif>
+                                            <do_elseif value="$Issue == 'Nominal'">
+                                                <do_if value="not @$SearchResults.$Suppliers.{$Ware}.count">
+                                                    <append_to_list name="namespace.$ParentCue.$PriorityProdNomQueue" exact="[$Station, $Product, $Ware, $NeededAmount, $PrioritySum, $Issue]" />
+                                                    <continue />
+                                                </do_if>
+                                            </do_elseif>
+                                            <set_value name="$Success" exact="false" />
+                                            <do_if value="$Issue == 'Overflow' or $Issue == 'Surplus'">
+                                                <do_for_each name="$DemanderTrade" in="$SearchResults.$Demanders.{$Ware}" counter="$TradeIndex" reverse="true">
+                                                    <do_if value="not $DemanderTrade.available or not $DemanderTrade.isbuyoffer or not $DemanderTrade.amount">
+                                                        <remove_value name="$SearchResults.$Demanders.{$Ware}.{$TradeIndex}" />
+                                                    </do_if>
+                                                    <do_else>
+                                                        <set_value name="$EndTrade" exact="$DemanderTrade" />
+                                                        <set_value name="$InitialAmount" exact="[$Ship.cargo.{$Ware}.free, $StartTrade.amount, $EndTrade.amount].min" />
+                                                        <do_if value="$InitialAmount == 0">
+                                                            <continue />
+                                                        </do_if>
+                                                        <do_if value="not $StartTrade.available or not $StartTrade.amount">
+                                                            <break />
+                                                        </do_if>
+                                                        <do_if value="not $EndTrade.available or not $EndTrade.amount">
+                                                            <remove_from_list name="$SearchResults.$Demanders.{$Ware}" exact="$EndTrade" />
+                                                            <continue />
+                                                        </do_if>
+
+                                                        <clamp_trade_amount trade="$StartTrade" amount="$InitialAmount" buyer="$Ship" seller="$StartTrade.seller" result="$BuyClamp" reason="$ClampReason" />
+                                                        <do_if value="$BuyClamp == 0">
+                                                            <continue />
+                                                        </do_if>
+                                                        <debug_text text="'Buying amount %s, %s, %s, %s, %s'.[$BuyClamp, $StartTrade.owner.name, $InitialAmount, $ClampReason, $Ware.name]" chance="@$DebugDecision" />
+
+                                                        <clamp_trade_amount trade="$EndTrade" amount="$BuyClamp" buyer="$EndTrade.buyer" result="$SellClamp" reason="$ClampReason" />
+                                                        <do_if value="$SellClamp == 0">
+                                                            <continue />
+                                                        </do_if>
+                                                        <debug_text text="'Selling amount %s, %s, %s, %s, %s'.[$SellClamp, $EndTrade.owner.name, $InitialAmount, $ClampReason, $Ware.name]" chance="@$DebugDecision" />
+                                                        <debug_text text="'StartTrade was %s'.[$StartTrade.amount]" chance="@$DebugDecision" />
+                                                        <create_trade_order name="$StartOrder" object="$Ship" tradeoffer="$StartTrade" amount="$SellClamp" />
+                                                        <debug_text text="'StartTrade is %s'.[$StartTrade.amount]" chance="@$DebugDecision" />
+                                                        <create_trade_order name="$EndOrder" object="$Ship" tradeoffer="$EndTrade" amount="$SellClamp" />
+                                                        <remove_from_list name="$SearchResults.$Demanders.{$Ware}" exact="$EndTrade" />
+
+                                                        <set_value name="$Success" exact="true" />
+                                                        <break />
+                                                    </do_else>
+                                                </do_for_each>
+                                            </do_if>
+                                            <do_else>
+                                                <do_for_each name="$SupplierTrade" in="$SearchResults.$Suppliers.{$Ware}" counter="$TradeIndex">
+                                                    <do_if value="not $SupplierTrade.available or not $SupplierTrade.isselloffer or not $SupplierTrade.amount">
+                                                        <remove_value name="$SearchResults.$Suppliers.{$Ware}.{$TradeIndex}" />
+                                                    </do_if>
+                                                    <do_else>
+                                                        <set_value name="$EndTrade" exact="$StartTrade" />
+                                                        <set_value name="$StartTrade" exact="$SupplierTrade" />
+                                                        <set_value name="$InitialAmount" exact="[$Ship.cargo.{$Ware}.free, $StartTrade.amount, $EndTrade.amount].min" />
+                                                        <do_if value="$InitialAmount == 0">
+                                                            <continue />
+                                                        </do_if>
+                                                        <do_if value="not $StartTrade.available or not $StartTrade.amount">
+                                                            <remove_from_list name="$SearchResults.$Suppliers.{$Ware}" exact="$EndTrade" />
+                                                            <continue />
+                                                        </do_if>
+                                                        <do_if value="not $EndTrade.available or not $EndTrade.amount">
+                                                            <break />
+                                                        </do_if>
+                                                        <clamp_trade_amount trade="$StartTrade" amount="$InitialAmount" buyer="$Ship" seller="$StartTrade.seller" result="$BuyClamp" reason="$ClampReason" />
+                                                        <do_if value="$BuyClamp == 0">
+                                                            <continue />
+                                                        </do_if>
+                                                        <debug_text text="'Buying amount %s, %s, %s, %s, %s'.[$BuyClamp, $StartTrade.owner.name, $InitialAmount, $ClampReason, $Ware.name]" chance="@$DebugDecision" />
+
+                                                        <clamp_trade_amount trade="$EndTrade" amount="$BuyClamp" buyer="$EndTrade.buyer" result="$SellClamp" reason="$ClampReason" />
+                                                        <do_if value="$SellClamp == 0">
+                                                            <continue />
+                                                        </do_if>
+                                                        <debug_text text="'Selling amount %s, %s, %s, %s, %s'.[$SellClamp, $EndTrade.owner.name, $InitialAmount, $ClampReason, $Ware.name]" chance="@$DebugDecision" />
+                                                        <debug_text text="'Amount was %s'.[$StartTrade.amount]" chance="@$DebugDecision" />
+                                                        <debug_text text="'StartTrade was %s'.[$StartTrade.amount]" chance="@$DebugDecision" />
+                                                        <create_trade_order name="$StartOrder" object="$Ship" tradeoffer="$StartTrade" amount="$SellClamp" />
+                                                        <remove_from_list name="$SearchResults.$Suppliers.{$Ware}" exact="$StartTrade" />
+                                                        <debug_text text="'Amount is %s'.[$StartTrade.amount]" chance="@$DebugDecision" />
+                                                        <debug_text text="'Seller %s %s in %s for %s'.[$StartOrder.trade.owner.name, $StartOrder.trade.owner.idcode, $StartOrder.trade.owner.sector.name, $StartOrder.trade.amount]" chance="@$DebugDecision" />
+                                                        <debug_text text="'StartTrade is %s'.[$StartTrade.amount]" chance="@$DebugDecision" />
+                                                        <create_trade_order name="$EndOrder" object="$Ship" tradeoffer="$EndTrade" amount="$SellClamp" />
+                                                        <set_value name="$Success" exact="true" />
+                                                        <break />
+                                                    </do_else>
+                                                </do_for_each>
+                                            </do_else>
+                                            <do_if value="$Success">
+                                                <debug_text text="'Remaining cargo space in FirstTrade was %s'.[$RemainingCargoSpace]" chance="@$DebugDecision" />
+                                                <set_value name="$RemainingCargoSpace" exact="$RemainingCargoSpace - $SellClamp * $Ware.volume" />
+                                                <debug_text text="'Now is %s'.[$RemainingCargoSpace]" chance="@$DebugDecision" />
+                                                <set_value name="$Station" exact="$StartTrade.owner" />
+                                                <set_value name="$OppositeStation" exact="$EndTrade.owner" />
+                                                <signal_cue_instantly cue="RecalcStationPriority" param="[$StartTrade, $EndTrade, $FormattedTable, $OrderQueue, $Product]" />
+                                                <set_value name="$HasTrade" exact="true" />
+                                                <remove_value name="$Success" />
+                                                <break />
+                                            </do_if>
+                                            <do_else>
+                                                <do_if value="$OrderEntry.{2}.available">
+                                                    <append_to_list name="$OrderQueue" exact="$OrderEntry" />
+                                                </do_if>
+                                            </do_else>
+                                        </do_if>
+                                    </do_if>
+                                    <do_else>
+                                        <remove_from_list name="$OrderQueue" exact="$OrderEntry" />
+                                    </do_else>
+                                </do_if>
+                            </do_for_each>
+                            <set_value name="$NoQueuedOrders" exact="true" />
+                        </do_if>
+                        <signal_cue_instantly cue="CargoFillProcess" />
+                    </actions>
+                </cue>
+                <cue name="SkipAStar" instantiate="true">
+                    <conditions>
+                        <event_cue_signalled />
+                    </conditions>
+                    <delay exact="2s" />
+                    <actions>
+                        <signal_cue_instantly cue="CargoFillProcess" />
+                    </actions>
+                </cue>
+                <cue name="CargoFillLoop">
+                    <conditions>
+                        <event_cue_signalled />
+                    </conditions>
+                    <delay exact="2s" />
+                    <actions>
+                        <reset_cue cue="this" />
+                        <set_value name="$DebugDecision" exact="0" />
+                        <debug_text text="'%s %s in %s for CargoLoop'.[$Ship.name, $Ship.idcode, $Ship.sector.name]" chance="@$DebugDecision" />
+                        <debug_text text="'Starting CargoFillLoop'" chance="@$DebugDecision" />
+                        <set_value name="$SortedQueue" exact="[]" />
+                        <do_for_each name="$QueueOrder" in="$OrderQueue" counter="$SortedIndex" comment="Evaluate needed wares from highest to lowest">
+                            <do_if value="$QueueOrder.{2}.available and $QueueOrder.{2}.amount" comment="Double-check that order is still valid">
+                                <do_for_each name="$Sector" in="$FinalPath" comment="Iterate our working $FinalPath to see if sector already exists">
+                                    <do_if value="($Sector.gatedistance.{$QueueOrder.{1}.sector} == 1 or $Sector.gatedistance.{$QueueOrder.{1}.sector} == 0) and not $SortedQueue.indexof.{$QueueOrder}">
+                                        <append_to_list name="$SortedQueue" exact="$QueueOrder" comment="If within distance tolerance, add order" />
+                                    </do_if>
+                                </do_for_each>
+                            </do_if>
+                        </do_for_each>
+                        <debug_text text="'SortedQueue count is %s cargo %s'.[@$SortedQueue.count, $RemainingCargoSpace]" chance="@$DebugDecision" />
+                        <sort_list list="$SortedQueue" sortbyvalue="loop.element.{4}" />
+                        <do_for_each name="$NextHighest" in="$SortedQueue">
+                            <do_if value="not $NextHighest.{2}.exists or not $NextHighest.{2}.available">
+                                <remove_from_list name="$OrderQueue" exact="$OrderEntry" />
+                                <continue />
+                            </do_if>
+                            <remove_from_list name="$OrderQueue" exact="$NextHighest" comment="Pull order from queue to prevent others from taking it in tandem" />
+                            <!-- Pull relavent info from our current ware request -->
+                            <set_value name="$Station" exact="$NextHighest.{1}" />
+                            <set_value name="$NewStartTrade" exact="$NextHighest.{2}" />
+                            <set_value name="$NewEndTrade" exact="null" />
+                            <set_value name="$Ware" exact="$NextHighest.{3}" />
+                            <do_if value="$RemainingCargoSpace / $Ware.volume lt 10">
+                                <set_value name="$NoTrades" exact="true" />
+                                <break />
+                            </do_if>
+                            <set_value name="$NeededAmount" exact="$NewStartTrade.amount" />
+                            <set_value name="$PrioritySum" exact="$NextHighest.{4}" />
+                            <set_value name="$Issue" exact="$NextHighest.{5}" />
+                            <set_value name="$Product" exact="$NextHighest.{6}" />
+
+                            <do_if value="$Issue == 'Overflow'">
+                                <do_if value="not @$SearchResults.$Demanders.{$Ware}.count">
+                                    <append_to_list name="namespace.$ParentCue.$PriorityProdOverQueue" exact="[$Station, $Product, $Ware, $NeededAmount, $PrioritySum, $Issue]" />
+                                    <continue />
+                                </do_if>
+                            </do_if>
+                            <do_elseif value="$Issue == 'Surplus'">
+                                <do_if value="not @$SearchResults.$Demanders.{$Ware}.count">
+                                    <append_to_list name="namespace.$ParentCue.$PriorityProdSurQueue" exact="[$Station, $Product, $Ware, $NeededAmount, $PrioritySum, $Issue]" />
+                                    <continue />
+                                </do_if>
+                            </do_elseif>
+                            <do_elseif value="$Issue == 'Build'">
+                                <do_if value="not @$SearchResults.$Suppliers.{$Ware}.count">
+                                    <append_to_list name="namespace.$ParentCue.$PriorityBuildQueue" exact="[$Station, $Product, $Ware, $NeededAmount, $PrioritySum, $Issue]" />
+                                    <continue />
+                                </do_if>
+                            </do_elseif>
+                            <do_elseif value="$Issue == 'Critical'">
+                                <do_if value="not @$SearchResults.$Suppliers.{$Ware}.count">
+                                    <append_to_list name="namespace.$ParentCue.$PriorityProdCritQueue" exact="[$Station, $Product, $Ware, $NeededAmount, $PrioritySum, $Issue]" />
+                                    <continue />
+                                </do_if>
+                            </do_elseif>
+                            <do_elseif value="$Issue == 'Low'">
+                                <do_if value="not @$SearchResults.$Suppliers.{$Ware}.count">
+                                    <append_to_list name="namespace.$ParentCue.$PriorityProdLowQueue" exact="[$Station, $Product, $Ware, $NeededAmount, $PrioritySum, $Issue]" />
+                                    <continue />
+                                </do_if>
+                            </do_elseif>
+                            <do_elseif value="$Issue == 'Nominal'">
+                                <do_if value="not @$SearchResults.$Suppliers.{$Ware}.count">
+                                    <append_to_list name="namespace.$ParentCue.$PriorityProdNomQueue" exact="[$Station, $Product, $Ware, $NeededAmount, $PrioritySum, $Issue]" />
+                                    <continue />
+                                </do_if>
+                            </do_elseif>
+
+
+                            <set_value name="$Success" exact="false" />
+                            <debug_text text="'%s %s finding pairs for %s %s %s %s'.[$Ship.name, $Ship.idcode, $NewStartTrade.owner.name, $NewStartTrade.owner.idcode, $NewStartTrade.amount, $Ware.name]" chance="@$DebugDecision" />
+                            <debug_text text="'%s %s remaining cargo is %s'.[$Ship.name, $Ship.idcode, $RemainingCargoSpace]" chance="@$DebugDecision" />
+                            <set_value name="$NewAdded" exact="false" />
+                            <set_value name="$FinalAdded" exact="false" />
+                            <do_if value="$Issue == 'Overflow' or $Issue == 'Surplus'" comment="Current order is station overflow or surplus product levels">
+                                <do_if value="$NewStartTrade.available and $NewStartTrade.isselloffer and $NewStartTrade.amount">
+                                    <set_value name="$NewTradeIndex" exact="0" />
+                                    <do_if value="not $FinalPath.indexof.{$NewStartTrade.owner.sector}">
+                                        <do_for_each name="$Sector" in="$FinalPath" counter="$SectorIndex">
+                                            <do_if value="$Sector.gatedistance.{$NewStartTrade.owner.sector} == 1">
+                                                <debug_text text="'Supplier %s sector added to final path %s at %s'.[$Issue, $NewStartTrade.owner.sector.name, $SectorIndex]" chance="@$DebugDecision" />
+                                                <set_value name="$NewTradeIndex" exact="$SectorIndex + 1" />
+                                                <set_value name="$NewAdded" exact="true" />
+                                                <break />
+                                            </do_if>
+                                        </do_for_each>
+                                        <do_if value="@$NewTradeIndex == 0">
+                                            <continue />
+                                        </do_if>
+                                    </do_if>
+                                    <do_else>
+                                        <set_value name="$NewTradeIndex" exact="$FinalPath.indexof.{$NewStartTrade.owner.sector}" />
+                                    </do_else>
+                                    <do_for_each name="$Trade" in="$SearchResults.$Demanders.{$Ware}">
+                                        <do_if value="not @$Trade.available or not @$Trade.amount">
+                                            <remove_from_list name="$SearchResults.$Demanders.{$Ware}" exact="$Trade" />
+                                        </do_if>
+                                    </do_for_each>
+                                    <set_value name="$SortedTrades" exact="$SearchResults.$Demanders.{$Ware}" />
+                                    <sort_trades name="$SortedTrades" tradelist="$SearchResults.$Demanders.{$Ware}" sorter="relativeprice" />
+                                    <do_for_each name="$Trade" in="$SortedTrades" reverse="true">
+                                        <do_if value="$Trade.available and $Trade.amount">
+                                            <set_value name="$FinalTradeIndex" exact="0" />
+                                            <do_if value="not $FinalPath.indexof.{$Trade.owner.sector} or $FinalPath.indexof.{$Trade.owner.sector} lt $NewTradeIndex">
+                                                <do_for_each name="$Sector" in="$FinalPath" counter="$SectorIndex" reverse="true">
+                                                    <do_if value="$SectorIndex gt $NewTradeIndex and $Sector.gatedistance.{$Trade.owner.sector} == 1">
+                                                        <debug_text text="'Demander %s sector added to final path %s at %s'.[$Issue, $Trade.owner.sector.name, $SectorIndex]" chance="@$DebugDecision" />
+                                                        <set_value name="$FinalTradeIndex" exact="$SectorIndex + 1" />
+                                                        <set_value name="$FinalAdded" exact="true" />
+                                                        <set_value name="$Success" exact="true" />
+                                                        <break />
+                                                    </do_if>
+                                                </do_for_each>
+                                                <do_if value="@$FinalTradeIndex == 0">
+                                                    <continue />
+                                                </do_if>
+                                            </do_if>
+                                            <do_else>
+                                                <set_value name="$FinalTradeIndex" exact="$FinalPath.indexof.{$Trade.owner.sector}" />
+                                                <set_value name="$Success" exact="true" />
+                                            </do_else>
+                                            <do_if value="$Success">
+                                                <set_value name="$NewEndTrade" exact="$Trade" />
+                                                <do_if value="not $NewStartTrade.available or not $NewStartTrade.amount">
+                                                    <set_value name="$Success" exact="false" />
+                                                    <break />
+                                                </do_if>
+                                                <do_if value="not $NewEndTrade.available or not $NewEndTrade.amount">
+                                                    <remove_from_list name="$SearchResults.$Demanders.{$Ware}" exact="$NewEndTrade" />
+                                                    <set_value name="$Success" exact="false" />
+                                                    <continue />
+                                                </do_if>
+                                                <clamp_trade_amount trade="$NewStartTrade" amount="$Ship.cargo.{$Ware}.free" buyer="$Ship" seller="$NewStartTrade.seller" result="$BuyClamp" reason="$ClampReason" />
+                                                <do_if value="$BuyClamp == 0">
+                                                    <set_value name="$Success" exact="false" />
+                                                    <break />
+                                                </do_if>
+                                                <debug_text text="'Buying amount %s, %s, %s, $s, %s, %s, %s'.[$BuyClamp, $NewStartTrade.owner.name, $NewStartTrade.owner.idcode, $NewStartTrade.owner.sector.name, $WareAmount, $ClampReason, $Ware.name]" chance="@$DebugDecision" />
+                                                <clamp_trade_amount trade="$NewEndTrade" amount="$BuyClamp" buyer="$NewEndTrade.buyer" result="$SellClamp" reason="$ClampReason" />
+                                                <do_if value="$SellClamp == 0">
+                                                    <set_value name="$Success" exact="false" />
+                                                    <continue />
+                                                </do_if>
+                                                <debug_text text="'Selling amount %s, %s, %s, %s, %s'.[$SellClamp, $NewEndTrade.owner.name, $WareAmount, $ClampReason, $Ware.name]" chance="@$DebugDecision" />
+                                                <add_ware_reservation object="$NewStartTrade.owner" type="buy" reserver="$Ship" ware="$Ware" amount="$SellClamp" duration="45s" result="$BuyReservation" replace="true" />
+                                                <add_ware_reservation object="$NewEndTrade.owner" type="sell" reserver="$Ship" ware="$Ware" amount="$SellClamp" duration="45s" result="$SellReservation" replace="true" />
+
+                                                <remove_from_list name="$SearchResults.$Demanders.{$Ware}" exact="$NewEndTrade" />
+                                                <break />
+                                            </do_if>
+                                        </do_if>
+                                    </do_for_each>
+                                </do_if>
+                                <do_else>
+                                    <continue />
+                                </do_else>
+                            </do_if>
+                            <do_else comment="Current order is critical, low, or nominal storage resource levels">
+                                <do_if value="$NewStartTrade.available and $NewStartTrade.isbuyoffer and $NewStartTrade.amount">
+                                    <set_value name="$NewTradeIndex" exact="0" />
+                                    <do_if value="$FinalPath.indexof.{$NewStartTrade.owner.sector}">
+                                        <do_for_each name="$Sector" in="$FinalPath" counter="$SectorIndex" reverse="true">
+                                            <do_if value="$Sector == $NewStartTrade.owner.sector">
+                                                <do_if value="$SectorIndex != 1">
+                                                    <set_value name="$NewTradeIndex" exact="$SectorIndex" />
+                                                    <break />
+                                                </do_if>
+                                            </do_if>
+                                        </do_for_each>
+                                    </do_if>
+                                    <do_else>
+                                        <do_for_each name="$Sector" in="$FinalPath" counter="$SectorIndex" reverse="true">
+                                            <do_if value="$Sector.gatedistance.{$NewStartTrade.owner.sector} == 1">
+                                                <debug_text text="'Demander %s sector added to final path %s at %s'.[$Issue, $NewStartTrade.owner.sector.name, $SectorIndex]" chance="@$DebugDecision" />
+                                                <set_value name="$NewTradeIndex" exact="$SectorIndex + 1" />
+                                                <set_value name="$FinalAdded" exact="true" />
+                                                <break />
+                                            </do_if>
+                                        </do_for_each>
+                                    </do_else>
+                                    <do_if value="$NewTradeIndex == 0">
+                                        <continue />
+                                    </do_if>
+
+                                    <do_for_each name="$Trade" in="$SearchResults.$Suppliers.{$Ware}" counter="$TradeIndex">
+                                        <do_if value="not @$Trade.available">
+                                            <remove_from_list name="$SearchResults.$Suppliers.{$Ware}" exact="$Trade" />
+                                        </do_if>
+                                    </do_for_each>
+                                    <set_value name="$SortedTrades" exact="$SearchResults.$Suppliers.{$Ware}" />
+                                    <sort_trades name="$SortedTrades" tradelist="$SearchResults.$Suppliers.{$Ware}" sorter="relativeprice" />
+                                    <do_for_each name="$Trade" in="$SortedTrades">
+                                        <do_if value="$Trade.available and $Trade.amount">
+                                            <set_value name="$FinalTradeIndex" exact="0" />
+                                            <do_if value="not $FinalPath.indexof.{$Trade.owner.sector} or $FinalPath.indexof.{$Trade.owner.sector} gt $NewTradeIndex">
+                                                <do_for_each name="$Sector" in="$FinalPath" counter="$SectorIndex">
+                                                    <do_if value="$SectorIndex lt $NewTradeIndex and $Sector.gatedistance.{$Trade.owner.sector} == 1">
+                                                        <debug_text text="'Supplier %s sector added to final path %s at %s'.[$Issue, $Trade.owner.sector.name, $SectorIndex]" chance="@$DebugDecision" />
+                                                        <set_value name="$FinalTradeIndex" exact="$SectorIndex + 1" />
+                                                        <set_value name="$Success" exact="true" />
+                                                        <set_value name="$NewAdded" exact="true" />
+                                                        <break />
+                                                    </do_if>
+                                                </do_for_each>
+                                                <do_if value="$FinalTradeIndex == 0">
+                                                    <continue />
+                                                </do_if>
+                                            </do_if>
+                                            <do_else>
+                                                <set_value name="$FinalTradeIndex" exact="$FinalPath.indexof.{$Trade.owner.sector}" />
+                                                <set_value name="$Success" exact="true" />
+                                            </do_else>
+                                            <do_if value="$Success">
+                                                <set_value name="$NewEndTrade" exact="$NewStartTrade" />
+                                                <set_value name="$NewStartTrade" exact="$Trade" />
+                                                <set_value name="$Temp" exact="$FinalTradeIndex" />
+                                                <set_value name="$FinalTradeIndex" exact="$NewTradeIndex" />
+                                                <set_value name="$NewTradeIndex" exact="$Temp" />
+                                                <remove_value name="$Temp" />
+
+                                                <do_if value="not $NewStartTrade.available or not $NewStartTrade.amount">
+                                                    <remove_from_list name="$SearchResults.$Suppliers.{$Ware}" exact="$NewStartTrade" />
+                                                    <set_value name="$Success" exact="false" />
+                                                    <continue />
+                                                </do_if>
+                                                <do_if value="not $NewEndTrade.available or not $NewEndTrade.amount or not $NewEndTrade.buyer?">
+                                                    <set_value name="$Success" exact="false" />
+                                                    <break />
+                                                </do_if>
+                                                <clamp_trade_amount trade="$NewStartTrade" amount="$Ship.cargo.{$Ware}.free" buyer="$Ship" seller="$NewStartTrade.seller" result="$BuyClamp" reason="$ClampReason" />
+                                                <do_if value="$BuyClamp == 0">
+                                                    <set_value name="$Success" exact="false" />
+                                                    <continue />
+                                                </do_if>
+                                                <debug_text text="'Buying amount %s, %s, %s, %s, %s'.[$BuyClamp, $NewStartTrade.owner.name, $WareAmount, $ClampReason, $Ware.name]" chance="@$DebugDecision" />
+                                                <clamp_trade_amount trade="$NewEndTrade" amount="$BuyClamp" buyer="$NewEndTrade.buyer" result="$SellClamp" reason="$ClampReason" />
+                                                <do_if value="$SellClamp == 0">
+                                                    <set_value name="$Success" exact="false" />
+                                                    <break />
+                                                </do_if>
+                                                <debug_text text="'Selling amount %s, %s, %s, %s, %s'.[$SellClamp, $NewEndTrade.owner.name, $WareAmount, $ClampReason, $Ware.name]" chance="@$DebugDecision" />
+
+                                                <add_ware_reservation object="$NewStartTrade.owner" type="buy" reserver="$Ship" ware="$Ware" amount="$SellClamp" duration="45s" result="$BuyReservation" replace="true" />
+                                                <add_ware_reservation object="$NewEndTrade.owner" type="sell" reserver="$Ship" ware="$Ware" amount="$SellClamp" duration="45s" result="$SellReservation" replace="true" />
+
+                                                <remove_from_list name="$SearchResults.$Suppliers.{$Ware}" exact="$NewEndTrade" />
+                                                <break />
+                                            </do_if>
+                                        </do_if>
+                                    </do_for_each>
+                                </do_if>
+                            </do_else>
+                            <do_if value="$Success">
+
+                                <set_value name="$Station" exact="$NewStartTrade.owner" />
+                                <set_value name="$OppositeStation" exact="$NewEndTrade.owner" />
+
+                                <append_to_list name="$CandidateTrades" exact="[$NewStartTrade, $NewTradeIndex, $NewAdded, $BuyReservation, $NewEndTrade, $FinalTradeIndex, $FinalAdded, $SellReservation]" />
+
+                                <signal_cue_instantly cue="RecalcStationPriority" param="[$NewStartTrade, $NewEndTrade, $FormattedTable, $OrderQueue, $Product]" />
+                                <remove_value name="$NewStartTrade" />
+                                <remove_value name="$NewEndTrade" />
+                                <remove_value name="$BuyClamp" />
+                                <remove_value name="$SellClamp" />
+                                <remove_value name="$NewTradeIndex" />
+                                <remove_value name="$FinalTradeIndex" />
+                            </do_if>
+                            <do_else>
+                                <append_to_list name="$OrderQueue" exact="$NextHighest" />
+                            </do_else>
+                        </do_for_each>
+
+                        <set_value name="$NoTrades" exact="true" />
+                        <signal_cue_instantly cue="CargoFillProcess" />
+                    </actions>
+                </cue>
+                <cue name="RecalcStationPriority" instantiate="true">
+                    <conditions>
+                        <event_cue_signalled />
+                    </conditions>
+                    <actions>
+                        <set_value name="$StartTrade" exact="event.param.{1}" />
+                        <set_value name="$EndTrade" exact="event.param.{2}" />
+                        <set_value name="$FormattedTable" exact="event.param.{3}" />
+                        <set_value name="$OrderQueue" exact="event.param.{4}" />
+                        <set_value name="$Product" exact="event.param.{5}" />
+
+                        <set_value name="$Ware" exact="$StartTrade.ware" />
+                        <set_value name="$Station" exact="$StartTrade.owner" />
+                        <set_value name="$OppositeStation" exact="$EndTrade.owner" />
+
+
+                        <do_if value="$Issue == 'Overflow' or $Issue == 'Surplus'">
+                            <do_if value="$Station.cargo.{$Ware}.max? and $Ware.transporttag == tag.container and $Station.maysellto.[$Faction, $Ware] and $Station.cargo.{$Product}.max gt 0">
+                                <set_value name="$OverflowPercent" exact="($Station.cargo.{$Ware}.count)f / ($Station.cargo.{$Ware}.max)f * 100" />
+                                <do_if value="$OverflowPercent gt 40">
+                                    <do_if value="$OverflowPercent gt 90">
+                                        <set_value name="$Issue" exact="'Overflow'" />
+                                        <set_value name="$NeededAmount" exact="$Station.cargo.{$Ware}.count / 2f" />
+                                        <set_value name="$StationPriority" exact="$FormattedTable.{$Station}.$ProdTimes.{$Ware}" />
+                                        <do_if value="$Ware == ware.energycells">
+                                            <set_value name="$WarePriority" exact="300" />
+                                        </do_if>
+                                        <do_else>
+                                            <set_value name="$WarePriority" exact="($Ware.group.tier + $Ware.group.priority) / 2f" />
+                                        </do_else>
+                                        <set_value name="$PrioritySum" exact="$WarePriority + ($StationPriority / $NeededAmount) + 50f" />
+                                        <find_sell_offer result="$SellTrade" seller="$Station" wares="$Ware" />
+                                    </do_if>
+                                    <do_else>
+                                        <set_value name="$Issue" exact="'Surplus'" />
+                                        <set_value name="$NeededAmount" exact="$Station.cargo.{$Ware}.count / 2f" />
+                                        <set_value name="$StationPriority" exact="$FormattedTable.{$Station}.$ProdTimes.{$Ware}" />
+                                        <set_value name="$WarePriority" exact="($Ware.group.tier + $Ware.group.priority) / 2f" />
+                                        <do_if value="$Ware == ware.energycells">
+                                            <set_value name="$WarePriority" exact="500" />
+                                        </do_if>
+                                        <do_else>
+                                            <set_value name="$PrioritySum" exact="$WarePriority + ($StationPriority / $NeededAmount) + 100f" />
+                                        </do_else>
+                                        <find_sell_offer result="$SellTrade" seller="$Station" wares="$Ware" />
+                                    </do_else>
+                                    <do_if value="$SellTrade.available and $SellTrade.amount">
+                                        <append_to_list name="$OrderQueue" exact="[$Station, $SellTrade, $Ware, $PrioritySum, $Issue, $Product]" />
+                                    </do_if>
+                                </do_if>
+                            </do_if>
+                            <find_buy_offer result="$BuyTrade" buyer="$OppositeStation" wares="$Ware" />
+                            <do_if value="$BuyTrade.available">
+                                <append_to_list name="$SearchResults.$Demanders.{$Ware}" exact="$BuyTrade" />
+                            </do_if>
+                        </do_if>
+                        <do_elseif value="$Issue == 'Build'">
+                            <set_value name="$DebugDecision" exact="0" />
+                            <debug_text text="'Running for builtrade for %s'.[namespace.$ParentCue.$FirmName]" chance="@$DebugDecision" />
+                            <debug_text text="'Station is %s %s in %s'.[$OppositeStation.name, $OppositeStation.idcode, $OppositeStation.sector.name]" chance="@$DebugDecision" />
+                            <debug_text text="'%s'.[$OppositeStation.base.buildingprocessor.neededsequenceresources.{$Ware}.count]" chance="@$DebugDecision" />
+                            <do_if value="$OppositeStation.base?">
+                                <do_if value="$OppositeStation.base.buildingprocessor.neededsequenceresources.{$Ware}.count">
+                                    <find_buy_offer result="$BuildTrade" buyer="$OppositeStation" wares="$Ware" />
+                                </do_if>
+                            </do_if>
+                            <do_elseif value="$OppositeStation.buildprocessor?">
+                                <do_if value="$OppositeStation.buildingprocessor.neededsequenceresources.{$Ware}.count">
+                                    <find_buy_offer result="$BuildTrade" buyer="$OppositeStation" wares="$Ware" />
+                                </do_if>
+                            </do_elseif>
+                            <do_else>
+                                <debug_text text="'Uhoh! I shouldn\'t be erroring like this'" chance="@$DebugDecision" />
+                                <debug_text text="'%s %s in %s'.[$OppositeStation.name, $OppositeStation.idcode, $OppositeStation.sector.name]" chance="@$DebugDecision" />
+                            </do_else>
+                            <do_if value="$BuildTrade.available and $BuildTrade.amount">
+                                <do_if value="$Ware == ware.energycells">
+                                    <set_value name="$PrioritySum" exact="1" />
+                                </do_if>
+                                <do_elseif value="$Ware == ware.claytronics or $Ware == ware.hullparts">
+                                    <set_value name="$PrioritySum" exact="2" />
+                                </do_elseif>
+                                <do_elseif value="$Ware == ware.shieldcomponents or $Ware == ware.turretcomponents">
+                                    <set_value name="$PrioritySum" exact="5" />
+                                </do_elseif>
+                                <do_else>
+                                    <set_value name="$PrioritySum" exact="3" />
+                                </do_else>
+                                <debug_text text="'BuildTrade is for %s %s with amount %s for ware %s'.[$BuildTrade.owner.name, $BuildTrade.owner.idcode, $BuildTrade.amount, $BuildTrade.ware]" chance="@$DebugDecision" />
+                                <append_to_list name="$OrderQueue" exact="[$OppositeStation, $BuildTrade, $Ware, 1, $Issue, $Ware]" />
+                            </do_if>
+                            <find_sell_offer result="$SellTrade" seller="$Station" wares="$Ware" />
+                            <do_if value="$SellTrade.available">
+                                <append_to_list name="$SearchResults.$Suppliers.{$Ware}" exact="$SellTrade" />
+                            </do_if>
+                        </do_elseif>
+                        <do_else>
+                            <set_value name="$DeficitPercent" exact="(1 - [1, ($OppositeStation.cargo.{$Ware}.count)f].max / [1, ($OppositeStation.cargo.{$Ware}.target)f].max)* 100" />
+                            <set_value name="$RemainingNeed" exact="$OppositeStation.cargo.{$Ware}.target - $OppositeStation.cargo.{$Ware}.count" />
+                            <debug_text text="'Opposite station is %s %s in %s with need %s'.[$OppositeStation.name, $OppositeStation.idcode, $OppositeStation.sector.name, $RemainingNeed]" chance="@$DebugDecision" />
+                            <do_if value="$RemainingNeed gt 0">
+                                <set_value name="$NeededAmount" exact="$RemainingNeed" />
+                                <set_value name="$StationPriority" exact="if $FormattedTable.{$OppositeStation}.$ProdTimes.{$Product}? then $FormattedTable.{$OppositeStation}.$ProdTimes.{$Product} else 3600" />
+                                <set_value name="$WarePriority" exact="($Ware.group.tier + $Ware.group.priority) / 2f" />
+                                <do_if value="$DeficitPercent gt 50">
+                                    <do_if value="$DeficitPercent gt 90">
+                                        <set_value name="$Issue" exact="'Critical'" />
+                                        <set_value name="$PrioritySum" exact="$WarePriority + ($StationPriority / $NeededAmount)" />
+                                    </do_if>
+                                    <do_else>
+                                        <set_value name="$Issue" exact="'Low'" />
+                                        <set_value name="$PrioritySum" exact="$WarePriority + ($StationPriority / $NeededAmount) + 50f" />
+                                    </do_else>
+                                </do_if>
+                                <do_else>
+                                    <set_value name="$Issue" exact="'Nominal'" />
+                                    <set_value name="$PrioritySum" exact="$WarePriority + ($StationPriority / $NeededAmount) + 200f" />
+                                </do_else>
+                                <find_buy_offer result="$BuyTrade" buyer="$OppositeStation" wares="$Ware" />
+                                <do_if value="$BuyTrade.available and $BuyTrade.amount">
+                                    <append_to_list name="$OrderQueue" exact="[$OppositeStation, $BuyTrade, $Ware, $PrioritySum, $Issue, $Product]" />
+                                </do_if>
+                            </do_if>
+                            <find_sell_offer result="$SellTrade" seller="$Station" wares="$Ware" />
+                            <do_if value="$SellTrade.available">
+                                <append_to_list name="$SearchResults.$Suppliers.{$Ware}" exact="$SellTrade" />
+                            </do_if>
+                        </do_else>
+                        <shuffle_list list="$OrderQueue" />
+                        <sort_list list="$OrderQueue" sortbyvalue="loop.element.{4}" />
+                    </actions>
+                </cue>
+                <cue name="BuildShipRoute" instantiate="true">
+                    <conditions>
+                        <event_cue_signalled />
+                    </conditions>
+                    <actions>
+                        <set_value name="$DebugDecision" exact="0" />
+                        <debug_text text="'%s %s in %s building route'.[$Ship.name, $Ship.idcode, $Ship.sector.name]" chance="@$DebugDecision" />
+                        <do_for_each name="$Order" in="$Ship.orders">
+                            <debug_text text="'%s %s %s'.[$Order.name, $Order.script, $Order.state]" chance="@$DebugDecision" />
+                        </do_for_each>
+                        <do_if value="$FinalPath.{1} != $Ship.sector">
+                            <set_value name="$FinalPath.{1}" exact="$Ship.sector" operation="insert" />
+                        </do_if>
+                        <do_if value="$Ship.order.state == orderstate.critical or $Ship.order.state == orderstate.finish">
+                            <set_value name="$OffsetIndex" exact="1" />
+                        </do_if>
+
+                        <set_value name="$PrevSector" exact="$Ship.sector" />
+
+                        <set_value name="$StartSectorIndex" exact="$FinalPath.indexof.{$StartOrder.trade.owner.sector}" />
+                        <set_value name="$EndSectorIndex" exact="$FinalPath.indexof.{$EndOrder.trade.owner.sector}" />
+
+                        <do_if value="$StartSectorIndex gt $EndSectorIndex">
+                            <set_value name="$EndSectorIndex" exact="$FinalPath.count" />
+                        </do_if>
+
+
+                        <debug_text text="'Start idx %s End idx %s'.[$StartSectorIndex, $EndSectorIndex]" chance="@$DebugDecision" />
+
+                        <create_list name="$OrdersByIdx" />
+                        <resize_list list="$OrdersByIdx" count="$FinalPath.count" />
+
+                        <!-- OrdersByIdx arranges trade orders by sector visition; $LocalOrders are all trade pairs where both supplier and buyer occupy the same sector -->
+                        <do_for_each name="$Sector" in="$FinalPath" counter="$Idx">
+                            <set_value name="$OrdersByIdx.{$Idx}" exact="[$Sector, table[$BuyOrders = [], $SellOrders = [], $LocalOrders = []]]" />
+                        </do_for_each>
+
+                        <do_if value="$StartSectorIndex == $EndSectorIndex">
+                            <append_to_list name="$OrdersByIdx.{$StartSectorIndex}.{2}.$LocalOrders" exact="[$StartOrder, $EndOrder]" />
+                        </do_if>
+                        <do_else>
+                            <append_to_list name="$OrdersByIdx.{$StartSectorIndex}.{2}.$BuyOrders" exact="$StartOrder" />
+                            <append_to_list name="$OrdersByIdx.{$EndSectorIndex}.{2}.$SellOrders" exact="$EndOrder" />
+                        </do_else>
+
+                        <do_if value="$CandidateTrades? and $CandidateTrades.count gt 0">
+                            <set_value name="$Tag" exact="$StartOrder.trade.ware.transporttag" />
+                            <set_value name="$CargoHold" exact="$Ship.cargo.capacity.{$Tag}" />
+                            <!-- [$SellerTradeRef, $SellerSectorIdx, $NewSectorToPath, $BuyReservation, $BuyerTradeRef, $BuyerSectorIdx, $NewSectorToPath2, $SellReservation] -->
+                            <do_for_each name="$Trade" in="$CandidateTrades">
+                                <debug_text text="'Possible %s trade: %s'.[$Trade.{1}.ware.name, $Trade]" chance="@$DebugDecision" />
+                                <set_value name="$TempOrdersByIdx" exact="$OrdersByIdx.clone" />
+                                <set_value name="$TempFinalPath" exact="$FinalPath.clone" />
+                                <set_value name="$NewWare" exact="$Trade.{1}.ware" />
+
+                                <set_value name="$CannotPath" exact="false" />
+                                <set_value name="$HasNoSpace" exact="false" />
+                                <set_value name="$IsResolved" exact="false" />
+
+                                <!-- Create sector visitation mapping -->
+                                <set_value name="$VisitIndex" exact="table[]" />
+                                <do_for_each name="$Sector" in="$TempFinalPath" counter="$Idx">
+                                    <do_if value="not $VisitIndex.{$Sector}?">
+                                        <set_value name="$VisitIndex.{$Sector}" exact="[$Idx]" />
+                                    </do_if>
+                                    <do_else>
+                                        <append_to_list name="$VisitIndex.{$Sector}" exact="$Idx" />
+                                    </do_else>
+                                </do_for_each>
+
+                                <set_value name="$SellerSector" exact="$Trade.{1}.owner.sector" />
+                                <set_value name="$BuyerSector" exact="$Trade.{5}.owner.sector" />
+
+                                <!-- Find if seller (so for our ship, our buy orders) is on path -->
+                                <do_if value="$VisitIndex.{$SellerSector}?">
+                                    <set_value name="$SellerIdx" exact="$VisitIndex.{$SellerSector}.{1}" />
+                                </do_if>
+                                <do_else>
+                                    <set_value name="$CannotPath" exact="true" />
+                                    <!-- Not on path; checking possible insertion points -->
+                                    <do_for_each name="$Sector" in="$TempFinalPath" counter="$Idx">
+                                        <do_if value="$Sector.gatedistance.{$SellerSector} == 1">
+                                            <set_value name="$SellerIdx" exact="$Idx + 1" />
+                                            <set_value name="$TempOrdersByIdx.{$SellerIdx}" exact="[$SellerSector, table[$BuyOrders = [], $SellOrders = [], $LocalOrders = []]]" operation="insert" />
+                                            <set_value name="$TempFinalPath.{$SellerIdx}" exact="$SellerSector" operation="insert" />
+                                            <set_value name="$CannotPath" exact="false" />
+                                            <break />
+                                        </do_if>
+                                    </do_for_each>
+                                </do_else>
+
+                                <!-- Cannot find on path and cannot find sector on path only 1 jump away! -->
+                                <do_if value="@$CannotPath">
+                                    <remove_ware_reservation object="$Trade.{1}.owner" reserver="$Ship" amount="$Trade.{4}" />
+                                    <remove_ware_reservation object="$Trade.{5}.owner" reserver="$Ship" amount="$Trade.{8}" />
+                                    <continue />
+                                </do_if>
+
+                                <!-- Rebuild visitation mapping -->
+                                <set_value name="$VisitIndex" exact="table[]" />
+                                <do_for_each name="$Sector" in="$TempFinalPath" counter="$Idx">
+                                    <do_if value="not $VisitIndex.{$Sector}?">
+                                        <set_value name="$VisitIndex.{$Sector}" exact="[$Idx]" />
+                                    </do_if>
+                                    <do_else>
+                                        <append_to_list name="$VisitIndex.{$Sector}" exact="$Idx" />
+                                    </do_else>
+                                </do_for_each>
+
+                                <!-- Find if buyer (so for ship, our sell orders) is on path -->
+                                <do_if value="$VisitIndex.{$BuyerSector}?">
+                                    <set_value name="$BuyerIdx" exact="$VisitIndex.{$BuyerSector}.{1}" />
+                                </do_if>
+                                <do_else>
+                                    <set_value name="$CannotPath" exact="true" />
+                                    <!-- Not on path; checking possible insertion points in reverse -->
+                                    <do_for_each name="$Sector" in="$TempFinalPath" counter="$Idx" reverse="true">
+                                        <do_if value="$Sector.gatedistance.{$BuyerSector} == 1">
+                                            <set_value name="$BuyerIdx" exact="$Idx + 1" />
+                                            <set_value name="$TempOrdersByIdx.{$BuyerIdx}" exact="[$BuyerSector, table[$BuyOrders = [], $SellOrders = [], $LocalOrders = []]]" operation="insert" />
+                                            <set_value name="$TempFinalPath.{$BuyerIdx}" exact="$BuyerSector" operation="insert" />
+                                            <set_value name="$CannotPath" exact="false" />
+                                            <break />
+                                        </do_if>
+                                    </do_for_each>
+                                </do_else>
+
+                                <!-- Cannot find on path and cannot find sector on path only 1 jump away! -->
+                                <do_if value="@$CannotPath">
+                                    <remove_ware_reservation object="$Trade.{1}.owner" reserver="$Ship" amount="$Trade.{4}" />
+                                    <remove_ware_reservation object="$Trade.{5}.owner" reserver="$Ship" amount="$Trade.{8}" />
+                                    <continue />
+                                </do_if>
+
+                                <!-- Rebuild visitation mapping -->
+                                <set_value name="$VisitIndex" exact="table[]" />
+                                <do_for_each name="$Sector" in="$TempFinalPath" counter="$Idx">
+                                    <do_if value="not $VisitIndex.{$Sector}?">
+                                        <set_value name="$VisitIndex.{$Sector}" exact="[$Idx]" />
+                                    </do_if>
+                                    <do_else>
+                                        <append_to_list name="$VisitIndex.{$Sector}" exact="$Idx" />
+                                    </do_else>
+                                </do_for_each>
+
+                                <!-- Check if seller is after buyer -->
+                                <do_if value="$SellerIdx gt $BuyerIdx">
+                                    <!-- Try to resolve buyer first -->
+                                    <do_for_each name="$VisitIdx" in="$VisitIndex.{$BuyerSector}">
+                                        <set_value name="$BuyerIdx" exact="$VisitIdx" />
+                                        <do_if value="$SellerIdx le $BuyerIdx">
+                                            <set_value name="$IsResolved" exact="true" />
+                                            <break />
+                                        </do_if>
+                                    </do_for_each>
+
+                                    <!-- Double-check indices for seller -->
+                                    <do_if value="not $IsResolved">
+                                        <do_for_each name="$VisitIdx" in="$VisitIndex.{$SellerSector}">
+                                            <set_value name="$SellerIdx" exact="$VisitIdx" />
+                                            <do_if value="$SellerIdx le $BuyerIdx">
+                                                <set_value name="$IsResolved" exact="true" />
+                                                <break />
+                                            </do_if>
+                                        </do_for_each>
+                                    </do_if>
+                                    <do_if value="not $IsResolved">
+                                        <set_value name="$CannotPath" exact="true" />
+                                    </do_if>
+                                </do_if>
+
+                                <do_if value="@$CannotPath">
+                                    <remove_ware_reservation object="$Trade.{1}.owner" reserver="$Ship" amount="$Trade.{4}" />
+                                    <remove_ware_reservation object="$Trade.{5}.owner" reserver="$Ship" amount="$Trade.{8}" />
+                                    <continue />
+                                </do_if>
+
+                                <debug_text text="'Seller is now %s and buyer is %s'.[$SellerIdx, $BuyerIdx]" chance="@$DebugDecision" />
+                                <set_value name="$TradeClamp" exact="[$Trade.{4} * $NewWare.volume, $Trade.{8} * $NewWare.volume, $CargoHold].min" />
+                                <set_value name="$RunningDelta" exact="0" />
+
+                                <remove_ware_reservation object="$Trade.{1}.owner" reserver="$Ship" amount="$Trade.{4}" />
+                                <remove_ware_reservation object="$Trade.{5}.owner" reserver="$Ship" amount="$Trade.{8}" />
+                                <find_sell_offer result="$SellCheck" seller="$Trade.{1}.owner" wares="$NewWare" tradepartner="$Ship" />
+                                <find_buy_offer result="$BuyCheck" buyer="$Trade.{5}.owner" wares="$NewWare" tradepartner="$Ship" />
+                                <do_if value="@$SellCheck.available and @$SellCheck.amount ge $Trade.{4} and @$BuyCheck.available and @$BuyCheck.amount ge $Trade.{8}">
+                                    <debug_text text="'Trade is still valid for %s'.[$NewWare.name]" chance="@$DebugDecision" />
+                                </do_if>
+                                <do_else>
+                                    <debug_text text="'Outdated trade!'" chance="@$DebugDecision" />
+                                    <continue />
+                                </do_else>
+
+                                <!-- Iterate through all orders to simulate cargo additions and subtractions at nth index -->
+                                <do_for_each name="$Entry" in="$TempOrdersByIdx" counter="$OrderIdx">
+
+                                    <!-- Simulate all cargo sales -->
+                                    <do_for_each name="$SellOrder" in="$Entry.{2}.$SellOrders">
+                                        <set_value name="$CargoDelta" exact="$SellOrder.trade.volume" />
+                                        <set_value name="$RunningDelta" exact="$RunningDelta + $CargoDelta" />
+                                    </do_for_each>
+
+                                    <!-- Simulate all cargo purchases -->
+                                    <do_for_each name="$BuyOrder" in="$Entry.{2}.$BuyOrders">
+                                        <set_value name="$CargoDelta" exact="-$BuyOrder.trade.volume" />
+                                        <set_value name="$RunningDelta" exact="$RunningDelta + $CargoDelta" />
+                                    </do_for_each>
+
+                                    <!-- Simulate all cargo trade pairs-->
+                                    <set_value name="$MinDelta" exact="0" />
+                                    <do_for_each name="$TradePair" in="$Entry.{2}.$LocalOrders">
+                                        <set_value name="$CargoDelta" exact="-$TradePair.{1}.trade.volume" />
+                                        <set_value name="$MinDelta" exact="[$CargoDelta, @$MinDelta].min" />
+                                        <set_value name="$RunningDelta" exact="$RunningDelta + $CargoDelta" />
+                                        <set_value name="$CargoDelta" exact="$TradePair.{2}.trade.volume" />
+                                        <set_value name="$RunningDelta" exact="$RunningDelta + $CargoDelta" />
+                                    </do_for_each>
+
+                                    <!-- From potential supplier index and beyond, calculate the maximum volume we can allot our potential ware -->
+                                    <do_if value="$OrderIdx ge $SellerIdx">
+                                        <debug_text text="'Remaining space is %s Delta %s tradeclamp %s and min is %s'.[$CargoHold + $RunningDelta + @$MinDelta, $RunningDelta, $TradeClamp, [$CargoHold + $RunningDelta, $TradeClamp].min]" chance="@$DebugDecision" />
+                                        <set_value name="$TradeClamp" exact="[$CargoHold + $RunningDelta + $MinDelta, $TradeClamp].min" />
+                                        <debug_text text="'TradeClamp now %s'.[$TradeClamp]" chance="@$DebugDecision" />
+                                    </do_if>
+
+                                    <!-- We've reached the buyer -->
+                                    <do_if value="$OrderIdx == $BuyerIdx">
+                                        <break />
+                                    </do_if>
+                                </do_for_each>
+
+                                <set_value name="$TradeClamp" exact="$TradeClamp / $NewWare.volume" />
+
+                                <!-- If we've used up all our space at some point, we cannot add this trade :( -->
+                                <do_if value="$TradeClamp le 0">
+                                    <set_value name="$HasNoSpace" exact="true" />
+                                </do_if>
+
+                                <do_if value="@$HasNoSpace">
+                                    <continue />
+                                </do_if>
+
+                                <create_trade_order name="$BuyTrade" object="$Ship" tradeoffer="$Trade.{1}" amount="$TradeClamp" />
+                                <create_trade_order name="$SellTrade" object="$Ship" tradeoffer="$Trade.{5}" amount="$TradeClamp" />
+
+                                <debug_text text="'Final amount for %s is %s'.[$NewWare.name, $TradeClamp]" chance="@$DebugDecision" />
+
+                                <do_if value="$SellerIdx == $BuyerIdx">
+                                    <append_to_list name="$TempOrdersByIdx.{$SellerIdx}.{2}.$LocalOrders" exact="[$BuyTrade, $SellTrade]" />
+                                    <debug_text text="'Same sector seller and buyer'" chance="@$DebugDecision" />
+                                </do_if>
+                                <do_else>
+                                    <append_to_list name="$TempOrdersByIdx.{$SellerIdx}.{2}.$BuyOrders" exact="$BuyTrade" />
+                                    <append_to_list name="$TempOrdersByIdx.{$BuyerIdx}.{2}.$SellOrders" exact="$SellTrade" />
+                                    <debug_text text="'Adding seller and buyer'" chance="@$DebugDecision" />
+                                </do_else>
+
+
+                                <set_value name="$OrdersByIdx" exact="$TempOrdersByIdx.clone" />
+
+
+                                <set_value name="$FinalPath" exact="$TempFinalPath.clone" />
+
+                            </do_for_each>
+                        </do_if>
+
+                        <set_value name="$RunningRoute" exact="[]" />
+                        <set_value name="$PrevSector" exact="$Ship.sector" />
+                        <do_for_each name="$Entry" in="$OrdersByIdx">
+                            <get_jump_path component="$JumpRoute" multiple="true">
+                                <start object="$PrevSector"></start>
+                                <end object="$Entry.{1}"></end>
+                            </get_jump_path>
+                            <do_if value="$JumpRoute?">
+                                <!-- If we are starting in the same sector that's our destination, we skip, otherwise we have a valid jump path -->
+                                <append_list_elements name="$RunningRoute" other="$JumpRoute" />
+                            </do_if>
+
+                            <!-- If our current sector has any buy, sell, or trade pairs, we move them into a valid series -->
+                            <do_if value="$Entry.{2}.$SellOrders.count gt 0 or $Entry.{2}.$BuyOrders.count gt 0 or $Entry.{2}.$LocalOrders.count gt 0">
+                                <!-- We have potentially accumulated a jump route, and if so, we compact it down to a single move command -->
+                                <do_if value="$RunningRoute.count">
+                                    <create_position name="$GatePos" object="$RunningRoute.last" space="$RunningRoute.last.sector" />
+                                    <create_order object="$Ship" id="'MoveWait'" name="$NextSection">
+                                        <param name="destination" value="[$RunningRoute.last.sector, $GatePos]" />
+                                        <param name="timeout" value="1s" />
+                                        <param name="gate" value="$RunningRoute" />
+                                    </create_order>
+                                </do_if>
+
+                                <!-- We take our last order and save its index -->
+                                <set_value name="$MoveIdx" exact="$Ship.orders.count" />
+                                <set_value name="$MoveOrder" exact="$Ship.orders.{$MoveIdx}" />
+                                <set_value name="$LastOrder" exact="$Ship.orders.last" />
+
+                                <!--    During candidate trades, trades are appended; so we iterate in reverse and insert at the index
+                                        This 'pushes' the order at index out; i.e. order at 3 -> 4
+                                -->
+                                <do_for_each name="$SellOrder" in="$Entry.{2}.$SellOrders" reverse="true">
+                                    <move_order order="$SellOrder" newindex="$MoveIdx" />
+                                    <set_value name="$LastOrder" exact="$SellOrder" />
+                                </do_for_each>
+
+                                <do_for_each name="$TradePair" in="$Entry.{2}.$LocalOrders" reverse="true">
+                                    <move_order order="$TradePair.{1}" newindex="$MoveIdx" />
+                                    <move_order order="$TradePair.{2}" newindex="$MoveIdx" />
+                                    <set_value name="$LastOrder" exact="$TradePair.{1}" />
+                                </do_for_each>
+
+                                <do_for_each name="$BuyOrder" in="$Entry.{2}.$BuyOrders" reverse="true">
+                                    <move_order order="$BuyOrder" newindex="$MoveIdx" />
+                                    <set_value name="$LastOrder" exact="$BuyOrder" />
+                                </do_for_each>
+
+                                <!-- We modify our move order (if it acttually is a move order), and set it to the last inserted trade order -->
+                                <do_if value="$MoveOrder.$destination?">
+                                    <create_position name="$StationPos" object="$LastOrder.trade.owner" space="$LastOrder.trade.owner.sector" />
+                                    <edit_order_param order="$MoveOrder" param="'destination'" value="[$LastOrder.trade.owner, $LastOrder.trade.owner.position]" />
+                                </do_if>
+                                <!-- Clear the route, and work on the next running route section, repeat -->
+                                <clear_list list="$RunningRoute" />
+                            </do_if>
+                            <set_value name="$PrevSector" exact="$Entry.{1}" />
+                        </do_for_each>
+                        <debug_text text="'%s %s in %s'.[$Ship.name, $Ship.idcode, $Ship.sector.name]" chance="@$DebugDecision" />
+                        <cancel_order order="$DummyOrder" />
+                        <debug_text text="'Final Orders by Index:'" chance="@$DebugDecision" />
+                        <set_value name="$CargoCheck" exact="$Ship.cargo.capacity.container" />
+                        <do_for_each name="$Order" in="$Ship.orders" chance="@$DebugDecision">
+                            <do_if value="$Order.$destination?">
+                                <debug_text text="''" />
+                                <debug_text text="'%s %s flying to %s in %s'.[$Ship.name, $Ship.idcode, $Order.$destination.{1}.name, $Order.$destination.{1}.sector.name]" chance="@$DebugDecision" />
+                            </do_if>
+                            <do_if value="$Order.trade.owner?">
+                                <set_value name="$BuyOrSell" exact="if $Order.trade.isselloffer then 'Producing' else 'Consuming'" />
+                                <set_value name="$CargoCheck" exact="if $Order.trade.isselloffer then $CargoCheck - $Order.trade.volume else $CargoCheck + $Order.trade.volume" />
+                                <debug_text text="'%s %s is %s with %s %s for %s in %s and amount %s free space: %s'.[$Ship.name, $Ship.idcode, $BuyOrSell, $Order.trade.owner.name, $Order.trade.owner.idcode, $Order.trade.ware, $Order.trade.owner.sector.name, $Order.trade.amount, $CargoCheck]" chance="@$DebugDecision" />
+                            </do_if>
+                        </do_for_each>
+                        <do_if value="namespace.$ParentCue.$CargoCues?">
+                            <remove_from_list name="namespace.$ParentCue.$CargoCues" exact="namespace" />
+                        </do_if>
+                        <set_value name="$CargoUtilization" exact="1f - ($RemainingCargoSpace)f / ($Ship.cargo.capacity.all)f" />
+                        <set_value name="$ShipsAdded" exact="namespace.$ParentCue.$ShipsAdded" />
+                        <set_value name="$ShipsAdded.{$Ship}" exact="[$CargoUtilization, player.age]" />
+                        <set_value name="$ParentCue.$LastEvalTime" exact="player.age" />
+                        <cancel_cue cue="namespace" />
+                    </actions>
+                </cue>
+                <cue name="AStarHighPath" instantiate="true" namespace="this">
+                    <conditions>
+                        <event_cue_signalled />
+                    </conditions>
+                    <actions>
+                        <set_value name="$MAXDISTANCE" exact="5500000" comment="approximation of the two most furthest points in galaxy" />
+                        <set_value name="$StartSector" exact="event.param.{1}" />
+                        <set_value name="$EndSector" exact="event.param.{2}" />
+                        <debug_text text="'Starting in %s and ending in %s'.[$StartSector.name, $EndSector.name]" chance="@$DebugDecision" />
+                        <set_value name="$SectorPath" exact="event.param.{3}" />
+                        <set_value name="$Faction" exact="event.param.{4}" />
+                        <set_value name="$FactionEntry" exact="event.param.{5}" />
+                        <set_value name="$KeyPath" exact="[]" />
+                        <set_value name="$StartTerritory" exact="global.$MKFactionData.$SectorToTerritory.{$StartSector}" />
+                        <set_value name="$EndTerritory" exact="global.$MKFactionData.$SectorToTerritory.{$EndSector}" />
+                        <set_value name="$TerritoryPQ" exact="table[]" />
+                        <set_value name="$TerritoryPQ.{$StartTerritory.$TerritoryKey}" exact="0" />
+                        <set_value name="$TerritoryCost" exact="table[]" />
+                        <set_value name="$TerritoryCost.{$StartTerritory.$TerritoryKey}" exact="0" />
+                        <set_value name="$PreviousKeys" exact="table[]" />
+                        <set_value name="$PreviousKeys.{$StartTerritory.$TerritoryKey}" exact="null" />
+                    </actions>
+                    <cues>
+                        <cue name="AStarHighStart">
+                            <delay exact="50ms" />
+                            <actions>
+                                <signal_cue_instantly cue="AStarHighProcess" />
+                            </actions>
+                        </cue>
+                        <cue name="AStarHighProcess">
+                            <conditions>
+                                <event_cue_signalled />
+                            </conditions>
+                            <delay exact="150ms" />
+                            <actions>
+                                <do_if value="not $Status?">
+                                    <signal_cue_instantly cue="AStarHighLoop" />
+                                </do_if>
+                                <do_else>
+                                    <signal_cue_instantly cue="AStarHighFinish" />
+                                </do_else>
+                                <reset_cue cue="this" />
+                            </actions>
+                        </cue>
+                        <cue name="AStarHighLoop">
+                            <conditions>
+                                <event_cue_signalled />
+                            </conditions>
+                            <delay exact="150ms" />
+                            <actions>
+                                <reset_cue cue="this" />
+                                <do_if value="$TerritoryPQ.keys.count">
+                                    <set_value name="$CurrentKey" exact="$TerritoryPQ.keys.sorted.{1}" />
+                                    <debug_text text="'Key is %s with value %s'.[$CurrentKey, $TerritoryPQ.{$CurrentKey}]" chance="@$DebugDecision" />
+                                    <do_if value="$CurrentKey == $EndTerritory.$TerritoryKey">
+                                        <set_value name="$Status" exact="true" />
+                                        <set_value name="$PreviousKeys.$End" exact="$CurrentKey" />
+                                    </do_if>
+                                    <do_else>
+                                        <set_value name="$Neighbors" exact="global.$MKFactionData.$GlobalNavGraph.{$CurrentKey}.$Neighbors" />
+                                        <do_for_each name="$NeighborKey" valuename="$NeighborEntry" in="$Neighbors">
+                                            <set_value name="$NeighborCost" exact="$FactionEntry.$CostGraph.{$NeighborKey}.$BaseCost + $TerritoryCost.{$CurrentKey}" />
+                                            <do_if value="not $TerritoryCost.{$NeighborKey}? or $NeighborCost lt $TerritoryCost.{$NeighborKey}">
+                                                <get_global_path component="$Pathway" resultdistance="$Distance">
+                                                    <start object="$NeighborEntry.$TerritoryEntry.$Sectors.{1}" />
+                                                    <end object="$EndSector" />
+                                                </get_global_path>
+                                                <set_value name="$TerritoryPQ.{$NeighborKey}" exact="$NeighborCost + ($Distance * $FactionEntry.$CostGraph.{$NeighborKey}.$BaseCost)" />
+                                                <set_value name="$TerritoryCost.{$NeighborKey}" exact="$NeighborCost" />
+                                                <set_value name="$PreviousKeys.{$NeighborKey}" exact="$CurrentKey" />
+                                            </do_if>
+                                        </do_for_each>
+                                        <remove_value name="$TerritoryPQ.{$CurrentKey}" />
+                                    </do_else>
+                                </do_if>
+                                <do_else>
+                                    <set_value name="$Status" exact="false" />
+                                </do_else>
+                                <signal_cue_instantly cue="AStarHighProcess" />
+                            </actions>
+                        </cue>
+                        <cue name="AStarHighFinish">
+                            <conditions>
+                                <event_cue_signalled />
+                            </conditions>
+                            <actions>
+                                <do_if value="$Status">
+                                    <set_value name="$CurrentKey" exact="$PreviousKeys.$End" />
+                                    <do_while value="$CurrentKey != null">
+                                        <append_to_list name="$KeyPath" exact="$CurrentKey" />
+                                        <set_value name="$CurrentKey" exact="$PreviousKeys.{$CurrentKey}" />
+                                    </do_while>
+                                    <signal_cue_instantly cue="AStarLowPath" param="[$StartSector, $EndSector, $SectorPath, $KeyPath, $Faction, $FactionEntry]" />
+                                </do_if>
+                                <do_else>
+                                    <debug_text text="'Error in high pathfinding for %s %s in %s!'.[namespace.$ParentCue.namespace.$Ship.name, namespace.$ParentCue.namespace.$Ship.idcode, namespace.$ParentCue.namespace.$Ship.sector.name]" />
+                                    <cancel_all_orders object="namespace.$ParentCue.namespace.$Ship" />
+                                    <remove_from_list name="namespace.$ParentCue.namespace.$ParentCue.$CargoCues" exact="namespace.$ParentCue.namespace" />
+                                    <cancel_cue cue="namespace.$ParentCue.namespace" />
+                                </do_else>
+                                <remove_value name="$Status" />
+                                <remove_value name="$StartTerritory" />
+                                <remove_value name="$EndTerritory" />
+                                <remove_value name="$PreviousKeys" />
+                                <remove_value name="$TerritoryPQ" />
+                            </actions>
+                        </cue>
+                    </cues>
+                </cue>
+                <cue name="AStarLowPath" instantiate="true" namespace="this">
+                    <conditions>
+                        <event_cue_signalled />
+                    </conditions>
+                    <actions>
+                        <set_value name="$StartSector" exact="event.param.{1}" />
+                        <set_value name="$EndSector" exact="event.param.{2}" />
+                        <set_value name="$SectorPath" exact="event.param.{3}" />
+                        <set_value name="$KeyPath" exact="event.param.{4}" />
+                        <set_value name="$Faction" exact="event.param.{5}" />
+                        <set_value name="$FactionEntry" exact="event.param.{6}" />
+                        <do_if value="$KeyPath.count">
+                            <create_group groupname="$Sectors" chance="0" />
+                            <set_value name="$SectorPQ" exact="table[]" />
+                            <set_value name="$SectorPQ.{$StartSector}" exact="0" />
+                            <set_value name="$SectorCost" exact="table[]" />
+                            <set_value name="$SectorCost.{$StartSector}" exact="0" />
+                            <set_value name="$PreviousSectors" exact="table[]" />
+                            <set_value name="$PreviousSectors.{$StartSector}" exact="null" />
+                            <do_for_each name="$Territory" in="$KeyPath" chance="0">
+                                <add_to_group groupname="$Sectors" list="global.$MKFactionData.$AllTerritories.{$Territory}.$Sectors" />
+                            </do_for_each>
+                        </do_if>
+                        <do_else>
+                            <debug_text text="'Aborting! No keys for trade route!'.[$KeyPath.count]" chance="@$DebugDecision" />
+                        </do_else>
+                    </actions>
+                    <cues>
+                        <cue name="AStarLowStart">
+                            <delay exact="150ms" />
+                            <actions>
+                                <do_if value="$SectorPQ.keys.count">
+                                    <signal_cue_instantly cue="AStarLowProcess" />
+                                </do_if>
+                                <do_else>
+                                    <debug_text text="'No valid keys!'" />
+                                </do_else>
+                            </actions>
+                        </cue>
+                        <cue name="AStarLowProcess">
+                            <conditions>
+                                <event_cue_signalled />
+                            </conditions>
+                            <delay exact="150ms" />
+                            <actions>
+                                <do_if value="not $Status?">
+                                    <signal_cue_instantly cue="AStarLowLoop" />
+                                </do_if>
+                                <do_else>
+                                    <signal_cue_instantly cue="AStarLowFinish" />
+                                </do_else>
+                                <reset_cue cue="this" />
+                            </actions>
+                        </cue>
+                        <cue name="AStarLowLoop">
+                            <conditions>
+                                <event_cue_signalled />
+                            </conditions>
+                            <delay exact="150ms" />
+                            <actions>
+                                <reset_cue cue="this" />
+                                <set_value name="$DebugDecision" exact="0" />
+                                <do_if value="$SectorPQ.keys.count">
+                                    <set_value name="$CurrentSector" exact="$SectorPQ.keys.sorted.{1}" />
+                                    <debug_text text="'Sector is %s with value %s for ship %s %s'.[$CurrentSector.name, $SectorPQ.{$CurrentSector}, namespace.$ParentCue.namespace.$Ship.name, namespace.$ParentCue.namespace.$Ship.idcode]" chance="@$DebugDecision" />
+                                    <do_if value="$CurrentSector == $EndSector">
+                                        <set_value name="$Status" exact="true" />
+                                        <set_value name="$PreviousSectors.$End" exact="$CurrentSector" />
+                                    </do_if>
+                                    <do_else>
+                                        <find_sector_in_range object="$CurrentSector" name="$Neighbors" maxdistance="1" multiple="true" />
+                                        <do_for_each name="$NeighborSector" in="$Neighbors">
+                                            <get_global_path component="$Pathway" resultdistance="$Distance">
+                                                <start object="$NeighborSector" />
+                                                <end object="$EndSector" />
+                                            </get_global_path>
+                                            <do_if value="$NeighborSector.trueowner.relationto.{$Faction} le -0.10">
+                                                <set_value name="$CostMultiplier" exact="100" />
+                                            </do_if>
+                                            <do_else>
+                                                <set_value name="$CostMultiplier" exact="1" />
+                                            </do_else>
+                                            <set_value name="$NeighborTerritory" exact="global.$MKFactionData.$SectorToTerritory.{$NeighborSector}.$TerritoryKey" />
+                                            <set_value name="$NeighborCost" exact="$FactionEntry.$CostGraph.{$NeighborTerritory}.$BaseCost + $SectorCost.{$CurrentSector}" />
+                                            <do_if value="not $SectorCost.{$NeighborSector}? or $NeighborCost lt $SectorCost.{$NeighborSector}">
+                                                <set_value name="$SectorPQ.{$NeighborSector}" exact="$NeighborCost + ($Distance * $CostMultiplier)" />
+                                                <set_value name="$SectorCost.{$NeighborSector}" exact="$NeighborCost" />
+                                                <set_value name="$PreviousSectors.{$NeighborSector}" exact="$CurrentSector" />
+                                            </do_if>
+                                        </do_for_each>
+                                        <remove_value name="$SectorPQ.{$CurrentSector}" />
+                                    </do_else>
+                                </do_if>
+                                <do_else>
+                                    <set_value name="$Status" exact="false" />
+                                </do_else>
+                                <signal_cue_instantly cue="AStarLowProcess" />
+                            </actions>
+                        </cue>
+                        <cue name="AStarLowFinish">
+                            <conditions>
+                                <event_cue_signalled />
+                            </conditions>
+                            <delay exact="150ms" />
+                            <actions>
+                                <do_if value="$Status">
+                                    <set_value name="$CurrentSector" exact="$PreviousSectors.$End" />
+                                    <do_while value="$CurrentSector != null">
+                                        <append_to_list name="$SectorPath" exact="$CurrentSector" />
+                                        <set_value name="$CurrentSector" exact="$PreviousSectors.{$CurrentSector}" />
+                                    </do_while>
+                                    <signal_cue_instantly cue="CargoFillProcess" />
+                                </do_if>
+                                <do_else>
+                                    <debug_text text="'Error in low pathfinding for %s %s in %s!'.[namespace.$ParentCue.namespace.$Ship.name, namespace.$ParentCue.namespace.$Ship.idcode, namespace.$ParentCue.namespace.$Ship.sector.name]" />
+                                    <debug_text text="'Status is %s'.[$Status]" />
+                                    <debug_text text="'Trying to go from %s to %s'.[$StartSector.name, $EndSector.name]" />
+                                    <do_for_each name="$Sector" in="$PreviousSectors">
+                                        <debug_text text="$Sector.name" />
+                                    </do_for_each>
+                                    <cancel_all_orders object="namespace.$ParentCue.namespace.$Ship" />
+                                    <remove_from_list name="namespace.$ParentCue.namespace.$ParentCue.$CargoCues" exact="namespace.$ParentCue.namespace" />
+                                    <cancel_cue cue="namespace.$ParentCue.namespace" />
+                                </do_else>
+                                <remove_value name="$Status" />
+                                <remove_value name="$Sectors" chance="0" />
+                                <remove_value name="$PreviousSectors" />
+                                <remove_value name="$SectorPQ" />
+                            </actions>
+                        </cue>
+                    </cues>
+                </cue>
+            </cues>
+        </cue>
+    </cues>
+</mdscript>
